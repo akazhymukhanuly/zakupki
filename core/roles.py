@@ -33,6 +33,7 @@ PERMISSIONS = {
     "integration.1c": [ACCOUNTANT, BUYER, ADMIN],
     "reports.view": [BUYER, DIRECTOR, CFO, ADMIN],
     "dashboard.buyer": [BUYER, ADMIN],
+    "refs.import": [ADMIN],
 }
 
 PERMISSION_LABELS = {
@@ -49,6 +50,7 @@ PERMISSION_LABELS = {
     "integration.1c": "Обмен с 1С",
     "reports.view": "Отчёты",
     "dashboard.buyer": "Дэшборд закупщика",
+    "refs.import": "Загрузка справочников из Excel",
 }
 
 

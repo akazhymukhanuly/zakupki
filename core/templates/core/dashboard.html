@@ -3,7 +3,9 @@
 {% block content %}
 <div class="d-flex align-items-center mb-3">
   <h1 class="page-title flex-grow-1">Дэшборд закупщика</h1>
+  {% if demo_mode %}
   <form method="post" action="{% url 'run_periodic' %}">{% csrf_token %}<button class="btn btn-sm btn-outline-secondary" title="Автозакрытие и SLA-напоминания (в проде — по расписанию)"><i class="bi bi-clock-history"></i> Запустить периодические задачи</button></form>
+  {% endif %}
 </div>
 <div class="row g-3 mb-3">
   <div class="col"><a href="{% url 'pool' %}" class="text-decoration-none text-reset"><div class="stat"><div class="v">{{ counters.pool }}</div><div class="l">позиций в пуле</div></div></a></div>
@@ -15,9 +17,9 @@
 
 <div class="row g-3">
 <div class="col-lg-6">
-  <div class="card mb-3"><div class="card-header">Позиции в пуле старше {{ stale_days }} дн. <span class="badge st-secondary">{{ stale|length }}</span></div>
+  <div class="card mb-3"><div class="card-header">Позиции в пуле старше {{ stale_days }} дн. <span class="badge st-secondary">{{ stale_count }}</span></div>
   <table class="table table-sm mb-0">
-    {% for i in stale|slice:":10" %}<tr class="{% if i.urgent %}row-urgent{% endif %}"><td><a href="{{ i.memo.get_absolute_url }}">{{ i.code }}</a></td><td>{{ i.description|truncatechars:45 }}</td><td class="num text-danger">{{ i.days_in_pool }} дн.</td></tr>
+    {% for i in stale %}<tr class="{% if i.urgent %}row-urgent{% endif %}"><td><a href="{{ i.memo.get_absolute_url }}">{{ i.code }}</a></td><td>{{ i.description|truncatechars:45 }}</td><td class="num text-danger">{{ i.days_in_pool }} дн.</td></tr>
     {% empty %}<tr><td class="muted text-center py-3">Нет</td></tr>{% endfor %}
   </table></div>
 
@@ -28,9 +30,9 @@
   </table></div>
 </div>
 <div class="col-lg-6">
-  <div class="card mb-3"><div class="card-header">Требуемый срок ≤ {{ warn_days }} дн., договора нет <span class="badge st-secondary">{{ near|length }}</span></div>
+  <div class="card mb-3"><div class="card-header">Требуемый срок ≤ {{ warn_days }} дн., договора нет <span class="badge st-secondary">{{ near_count }}</span></div>
   <table class="table table-sm mb-0">
-    {% for i in near|slice:":12" %}<tr class="{% if i.urgent %}row-urgent{% endif %}"><td><a href="{{ i.memo.get_absolute_url }}">{{ i.code }}</a></td><td>{{ i.description|truncatechars:40 }}</td><td>{% badge i.status i.get_status_display %}</td>
+    {% for i in near %}<tr class="{% if i.urgent %}row-urgent{% endif %}"><td><a href="{{ i.memo.get_absolute_url }}">{{ i.code }}</a></td><td>{{ i.description|truncatechars:40 }}</td><td>{% badge i.status i.get_status_display %}</td>
       <td class="text-nowrap {% if i.is_overdue %}text-danger fw-semibold{% endif %}">{{ i.required_date|date:"d.m.Y" }}</td></tr>
     {% empty %}<tr><td class="muted text-center py-3">Нет</td></tr>{% endfor %}
   </table></div>

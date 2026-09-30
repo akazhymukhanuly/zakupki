@@ -3,6 +3,7 @@ from collections import Counter, OrderedDict
 from datetime import timedelta
 
 from django.contrib import messages
+from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
@@ -10,34 +11,39 @@ from django.views.decorators.http import require_POST
 from .. import roles, services
 from ..forms import ProcurementForm
 from ..models import BudgetItem, Category, Department, MemoItem, Procurement
-from .common import attempt
+from .common import attempt, paginate
+
+POOL_PAGE_SIZE = 200
 
 
 @roles.require("pool.view")
 def pool(request):
-    items = services.pool_items()
+    qs = services.pool_queryset()
     f = request.GET
     if f.get("category"):
-        items = [i for i in items if str(i.category_id) == f["category"]]
+        qs = qs.filter(category_id=f["category"])
     if f.get("department"):
-        items = [i for i in items if str(i.memo.department_id) == f["department"]]
+        qs = qs.filter(memo__department_id=f["department"])
     if f.get("budget"):
-        items = [i for i in items if str(i.budget_item_id) == f["budget"]]
+        qs = qs.filter(budget_item_id=f["budget"])
     if f.get("urgent"):
-        items = [i for i in items if i.urgent]
-    if f.get("due"):
-        limit = timezone.localdate() + timedelta(days=int(f["due"]))
-        items = [i for i in items if i.required_date <= limit]
+        qs = qs.filter(urgent=True)
+    if f.get("due", "").isdigit():
+        qs = qs.filter(required_date__lte=timezone.localdate() + timedelta(days=int(f["due"])))
     if f.get("q"):
-        q = f["q"].lower()
-        items = [i for i in items if q in i.description.lower() or q in i.code.lower()]
-
-    # Подсветка одинаковой номенклатуры из разных СЗ — кандидаты на консолидацию.
-    memos_by_nom = {}
-    for i in items:
-        if i.nomenclature_id:
-            memos_by_nom.setdefault(i.nomenclature_id, set()).add(i.memo_id)
-    dup_noms = {n for n, ms in memos_by_nom.items() if len(ms) > 1}
+        q = f["q"].strip()
+        cond = Q(description__icontains=q) | Q(nomenclature__name__icontains=q)
+        if q.isdigit():
+            cond |= Q(memo__number=int(q))
+        qs = qs.filter(cond)
+    # Кандидаты на консолидацию: номенклатура, которая есть в пуле из разных СЗ (по всему пулу, а не странице).
+    dup_noms = set(
+        services.pool_queryset().exclude(nomenclature=None).values("nomenclature")
+        .annotate(n=Count("memo", distinct=True)).filter(n__gt=1).values_list("nomenclature", flat=True)
+    )
+    qs = qs.order_by("-urgent", "required_date", "memo__number", "line_no")
+    page, qs_params = paginate(request, qs, POOL_PAGE_SIZE)
+    items = list(page)
 
     stale_days = services.cfg("POOL_STALE_DAYS")
     now = timezone.now()
@@ -46,7 +52,6 @@ def pool(request):
         i.days_in_pool = (now - i.pool_since).days if i.pool_since else 0
         i.is_stale = i.days_in_pool >= stale_days
 
-    items.sort(key=lambda i: (not i.urgent, i.required_date, i.memo.number, i.line_no))
     group = f.get("group", "category")
     groups = OrderedDict()
     for i in sorted(items, key=lambda i: (str(i.category or "яяя") if group == "category" else "")):
@@ -56,7 +61,8 @@ def pool(request):
     open_procs = Procurement.objects.filter(status__in=[Procurement.Status.DRAFT, Procurement.Status.RFQ,
                                                         Procurement.Status.COLLECTING])
     return render(request, "core/pool.html", {
-        "groups": groups, "count": len(items), "dup_count": sum(1 for i in items if i.is_dup),
+        "groups": groups, "count": page.paginator.count, "page": page, "qs_params": qs_params,
+        "dup_count": services.pool_queryset().filter(nomenclature__in=dup_noms).count(),
         "categories": Category.objects.all(), "departments": Department.objects.all(),
         "budgets": BudgetItem.objects.all(), "f": f, "group": group,
         "form": ProcurementForm(initial={"buyer": request.user, "kp_deadline": timezone.localdate() + timedelta(days=7)}),

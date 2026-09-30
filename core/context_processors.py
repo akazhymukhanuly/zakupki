@@ -1,3 +1,5 @@
+from django.conf import settings
+
 from . import roles
 
 
@@ -18,4 +20,5 @@ def nav(request):
         "perm": _Perms(user),
         "my_roles": sorted(roles.user_roles(user)),
         "unread_count": user.notifications.filter(is_read=False).count(),
+        "demo_mode": settings.DEMO_MODE,
     }

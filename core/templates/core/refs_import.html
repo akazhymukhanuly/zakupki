@@ -1,0 +1,49 @@
+{% extends "core/base.html" %}
+{% block title %}Загрузка справочников{% endblock %}
+{% block content %}
+<h1 class="page-title mb-1">Загрузка справочников из Excel</h1>
+<p class="muted">Один файл со всеми справочниками заказчика. Повторная загрузка безопасна: существующие записи обновляются, новые добавляются, ничего не удаляется.</p>
+
+{% if report %}
+  {% if report.errors %}
+  <div class="alert alert-danger"><b>Найдено ошибок: {{ report.errors|length }}. Ничего не записано.</b> Исправьте файл и загрузите снова.
+    <ul class="mb-0 mt-2">{% for e in report.errors %}<li>{{ e }}</li>{% endfor %}</ul></div>
+  {% else %}
+  <div class="alert {% if report.dry_run %}alert-info{% else %}alert-success{% endif %}">
+    <b>{% if report.dry_run %}Проверка пройдена — можно загружать.{% else %}Загружено.{% endif %}</b>
+    <ul class="mb-0 mt-2">
+      {% for s, n in report.created.items %}<li>{{ s }}: {% if report.dry_run %}будет добавлено{% else %}добавлено{% endif %} {{ n }}</li>{% endfor %}
+      {% for s, n in report.updated.items %}<li>{{ s }}: {% if report.dry_run %}будет обновлено{% else %}обновлено{% endif %} {{ n }}</li>{% endfor %}
+    </ul>
+  </div>
+  {% if report.passwords and not report.dry_run %}
+  <div class="card border-warning mb-3"><div class="card-header bg-warning-subtle">Временные пароли новых пользователей — показываются один раз</div>
+    <table class="table table-sm mb-0"><tr><th>Логин</th><th>Пароль</th></tr>
+    {% for u, p in report.passwords %}<tr><td>{{ u }}</td><td><code>{{ p }}</code></td></tr>{% endfor %}</table>
+    <div class="card-body small-muted">Раздайте пароли пользователям; при первом входе пусть сменят их (ссылка «сменить пароль» вверху страницы).</div>
+  </div>
+  {% endif %}
+  {% endif %}
+{% endif %}
+
+<div class="row g-3">
+<div class="col-lg-5">
+  <div class="card"><div class="card-body">
+    <p><a class="btn btn-outline-success btn-sm" href="{% url 'refs_template' %}"><i class="bi bi-download"></i> Скачать шаблон</a></p>
+    <form method="post" enctype="multipart/form-data">{% csrf_token %}
+      <input type="file" name="file" accept=".xlsx" class="form-control mb-2" required>
+      <div class="d-flex gap-2">
+        <button class="btn btn-outline-primary" name="mode" value="check">Проверить</button>
+        <button class="btn btn-primary" name="mode" value="apply" data-confirm="Загрузить справочники в систему?">Загрузить</button>
+      </div>
+    </form>
+  </div></div>
+</div>
+<div class="col-lg-7">
+  <div class="card"><div class="card-header">Листы шаблона</div>
+  <ul class="list-group list-group-flush">
+    {% for name, cols in sheets.items %}<li class="list-group-item"><b>{{ name }}</b><div class="small-muted">{% for c in cols %}{{ c.0 }}{% if c.1 %}*{% endif %}{% if not forloop.last %}, {% endif %}{% endfor %}</div></li>{% endfor %}
+  </ul></div>
+</div>
+</div>
+{% endblock %}

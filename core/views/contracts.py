@@ -8,7 +8,7 @@ from django.views.decorators.http import require_POST
 from .. import excel, onec, roles, services
 from ..forms import ContractForm, UploadForm
 from ..models import Contract, ContractLine, ReceiptLine
-from .common import attempt, dec
+from .common import attempt, dec, paginate
 
 
 @roles.require("contract.view")
@@ -21,15 +21,16 @@ def contract_list(request):
         qs = qs.filter(supplier__name__icontains=f["supplier"])
     if f.get("kind"):
         qs = qs.filter(kind=f["kind"])
+    page, qs_params = paginate(request, qs)
     return render(request, "core/contract_list.html", {
-        "contracts": qs, "statuses": Contract.Status.choices, "kinds": Contract.Kind.choices, "f": f,
+        "contracts": page, "qs_params": qs_params, "statuses": Contract.Status.choices, "kinds": Contract.Kind.choices, "f": f,
     })
 
 
 @roles.require("contract.manage")
 def contract_create(request):
     form = ContractForm(request.POST or None, initial={"kind": Contract.Kind.FRAMEWORK, "status": Contract.Status.SIGNED,
-                                                       "number": services.next_contract_number()})
+                                                       "number": services.next_contract_number(reserve=False)})
     if request.method == "POST" and form.is_valid():
         c = form.save(commit=False)
         c.responsible = request.user

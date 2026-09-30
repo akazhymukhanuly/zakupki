@@ -25,7 +25,7 @@ from decimal import Decimal, InvalidOperation
 from django.conf import settings
 from django.utils import timezone
 
-from .models import Contract, ContractLine, MemoItem, ReceiptLine
+from .models import Contract, ContractLine, MemoItem, Payment, Receipt, ReceiptLine
 from .services import BusinessError, register_payment, register_receipt
 
 FORMAT_VERSION = "1.0"
@@ -275,10 +275,14 @@ def import_receipts(uploaded, user):
     for r in rows:
         key = (str(r.get("Договор", "")).strip(), str(r.get("НомерДокумента") or "").strip(), _to_date(r.get("Дата")))
         docs.setdefault(key, []).append(r)
-    report = {"docs": 0, "by_id": 0, "by_nomenclature": 0, "unmatched": 0, "errors": []}
+    report = {"docs": 0, "by_id": 0, "by_nomenclature": 0, "unmatched": 0, "skipped": 0, "errors": []}
     for (number, doc_no, d), doc_rows in docs.items():
         try:
             contract = _find_contract(number)
+            # Повторная загрузка того же документа 1С не задваивает поступление.
+            if doc_no and Receipt.objects.filter(contract=contract, doc_number=doc_no, date=d).exists():
+                report["skipped"] += 1
+                continue
             entries = []
             for r in doc_rows:
                 qty = _to_dec(r.get("Количество"))
@@ -316,6 +320,11 @@ def import_payments(uploaded, user):
     for r in rows:
         try:
             contract = _find_contract(r.get("Договор"))
+            doc_no = str(r.get("НомерДокумента") or "").strip()
+            amount, d = _to_dec(r.get("Сумма")), _to_date(r.get("Дата"))
+            if doc_no and Payment.objects.filter(contract=contract, doc_number=doc_no, date=d, amount=amount).exists():
+                report["skipped"] = report.get("skipped", 0) + 1
+                continue
             register_payment(contract, _to_date(r.get("Дата")), _to_dec(r.get("Сумма")),
                              str(r.get("НомерДокумента") or "").strip(), user)
             report["payments"] += 1

@@ -58,6 +58,7 @@
 <div class="card card-body text-center muted py-5">Пул пуст — все утверждённые позиции распределены по закупкам.</div>
 {% endfor %}
 
+{% include "core/_pagination.html" with page=page %}
 {% if perm.procurement_manage and count %}
 <div class="sel-bar rounded">
   <div class="d-flex flex-wrap gap-2 align-items-end">

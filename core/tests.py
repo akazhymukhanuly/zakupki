@@ -90,6 +90,7 @@ class MemoStatusTests(Base):
     def test_problem_status_when_overdue(self):
         m = self.memo(self.initiator, [(self.paper, 10)])
         MemoItem.objects.filter(memo=m).update(required_date=timezone.localdate() - timedelta(days=1))
+        services.run_periodic()  # статус «Проблемная» зависит от даты и обновляется периодической задачей
         m = Memo.objects.get(pk=m.pk)
         self.assertEqual(m.aggregate_status[0], "problem")
 
@@ -295,6 +296,7 @@ class OneCTests(Base):
         self.assertEqual(pens.delivered_qty, D(0))  # ждёт ручного подтверждения
         rl = ReceiptLine.objects.get(confirmed=False)
         services.confirm_receipt_line(rl, rl.contract_line, self.buyer)
+        pens.refresh_from_db()
         self.assertEqual(pens.delivered_qty, D(5))
         c.refresh_from_db()
         self.assertEqual(c.status, Contract.Status.EXECUTED)
@@ -319,7 +321,8 @@ class SmokeTests(TestCase):
         from .models import Contract as C, Procurement as P
         urls = [reverse(n) for n in ["home", "approvals", "memo_list", "memo_create", "pool", "procurement_list",
                                      "contract_list", "integration", "reports", "notifications", "rights",
-                                     "dashboard", "supplier_list", "contract_create"]]
+                                     "dashboard", "supplier_list", "contract_create", "refs_import",
+                                     "password_change"]]
         urls += [reverse("reports") + f"?r={r}" for r in ["cycle", "savings", "suppliers"]]
         urls += [m.get_absolute_url() for m in Memo.objects.all()]
         urls += [reverse("memo_print", args=[m.pk]) for m in Memo.objects.all()]
@@ -467,3 +470,110 @@ class HttpFlowTests(Base):
         self.client.force_login(self.buyer)
         for r_ in ["coverage", "cycle", "savings", "suppliers"]:
             self.assertEqual(self.client.get(reverse("reports") + f"?r={r_}&export=1").status_code, 200)
+
+
+class ProductionTests(Base):
+    def test_refs_import_template_roundtrip(self):
+        from openpyxl import load_workbook
+        from .refs_import import build_template, import_workbook
+        wb = load_workbook(io.BytesIO(build_template()))
+        self.assertEqual(import_workbook(build_template()).created, {})  # пустой шаблон ничего не создаёт
+        def put(sheet, *rows):
+            ws = wb[sheet]
+            for r in rows:
+                ws.append(list(r))
+        put("Подразделения", ("Финансы", "fin_head"))
+        put("Пользователи", ("fin_head", "Ахметова", "Алия", "a@x.kz", "Финансы", "Руководитель", "Согласующий"),
+            ("zakup1", "Касымов", "Данияр", "", "", "", "Закупщик, Инициатор"))
+        put("Категории", ("Канцтовары",))
+        put("Номенклатура", ("Бумага А4", "пач", "Канцтовары", "00-1"))
+        put("Поставщики", ("ТОО Альфа", "123456789012", "", "", "", "Канцтовары", ""))
+        put("Рамочные договоры", ("РД-1", "01.01.2026", "123456789012", "31.12.2026"))
+        put("Пороги согласования", ("2 000 000", "Директор"))
+        put("Статьи бюджета")
+        buf = io.BytesIO()
+        wb.save(buf)
+        data = buf.getvalue()
+
+        dry = import_workbook(data, dry_run=True)
+        self.assertEqual(dry.errors, [])
+        self.assertFalse(User.objects.filter(username="zakup1").exists())  # проверка ничего не пишет
+
+        rep = import_workbook(data)
+        self.assertEqual(rep.errors, [])
+        self.assertEqual(Department.objects.get(name="Финансы").head.username, "fin_head")
+        u = User.objects.get(username="zakup1")
+        self.assertTrue(roles.has_role(u, roles.BUYER))
+        self.assertEqual(len(rep.passwords), 2)
+        self.assertTrue(Contract.objects.filter(number="РД-1", kind=Contract.Kind.FRAMEWORK).exists())
+        self.assertTrue(ApprovalRule.objects.filter(min_amount=D(2000000)).exists())
+        # Повторная загрузка — обновление, без дублей и без новых паролей.
+        rep2 = import_workbook(data)
+        self.assertEqual(rep2.created.get("Пользователи"), None)
+        self.assertEqual(rep2.passwords, [])
+        self.assertEqual(Supplier.objects.filter(bin="123456789012").count(), 1)
+
+    def test_refs_import_errors_rollback(self):
+        from openpyxl import load_workbook
+        from .refs_import import build_template, import_workbook
+        wb = load_workbook(io.BytesIO(build_template()))
+        wb["Пользователи"].append(["ok_user", "А", "Б", "", "", "", "Инициатор"])
+        wb["Пользователи"].append(["bad user", "А", "Б", "", "", "", "Инициатор"])
+        wb["Пользователи"].append(["u3", "А", "Б", "", "Нет такого", "", "Космонавт"])
+        buf = io.BytesIO()
+        wb.save(buf)
+        rep = import_workbook(buf.getvalue())
+        self.assertEqual(len(rep.errors), 2)
+        self.assertIn("строка 3", rep.errors[0])
+        self.assertFalse(User.objects.filter(username="ok_user").exists())  # при ошибках ничего не записано
+
+    def test_onec_reimport_is_idempotent_and_folder_exchange(self):
+        import tempfile
+        from pathlib import Path
+        m = self.memo(self.initiator, [(self.paper, 10)])
+        proc = services.create_procurement(self.buyer, list(m.items.all()), "Т")
+        services.add_rfqs(proc, [self.s1], self.buyer)
+        self.quote(proc, self.s1, {self.paper: 100})
+        services.decision_preset(proc, "best", self.buyer)
+        services.submit_decision(proc, self.buyer)
+        (c,) = services.create_contracts(proc, self.buyer, {})
+        c.number = "Д-5"
+        c.save()
+        services.set_contract_status(c, Contract.Status.SIGNING, self.buyer)
+        services.set_contract_status(c, Contract.Status.SIGNED, self.buyer)
+        csv_text = f"Договор;Дата;НомерДокумента;IDПозиции;Номенклатура;КодНоменклатуры;Количество\nД-5;01.10.2026;ПТУ-7;{m.items.get().code};;;4\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            call_command("onec_exchange", dir=tmp, stdout=io.StringIO())
+            self.assertEqual(len(list((base / "out").glob("contracts_*.xml"))), 1)
+            (base / "in" / "receipts_1.csv").write_text(csv_text, encoding="utf-8")
+            (base / "in" / "receipts_2.csv").write_text(csv_text, encoding="utf-8")  # 1С прислала повторно
+            (base / "in" / "payments_bad.csv").write_text("Договор;Сумма\nНЕТ;1\n", encoding="utf-8")
+            call_command("onec_exchange", dir=tmp, stdout=io.StringIO(), stderr=io.StringIO())
+            self.assertEqual(len(list((base / "archive").iterdir())), 2)
+            self.assertEqual(len(list((base / "error").glob("*.log"))), 1)
+            # Второй запуск не выгружает договор повторно.
+            call_command("onec_exchange", dir=tmp, stdout=io.StringIO())
+            self.assertEqual(len(list((base / "out").glob("contracts_*.xml"))), 1)
+        item = m.items.get()
+        self.assertEqual(item.delivered_qty, D(4))  # не 8
+
+    def test_login_lockout_and_health(self):
+        from django.core.cache import cache
+        call_command("createcachetable", stdout=io.StringIO())
+        cache.clear()
+        for _ in range(5):
+            self.client.post(reverse("login"), {"username": "buyer", "password": "wrong"})
+        r = self.client.post(reverse("login"), {"username": "buyer", "password": "x"})  # верный пароль, но блок
+        self.assertNotIn("_auth_user_id", self.client.session)
+        self.assertContains(r, "Слишком много")
+        cache.clear()
+        r = self.client.post(reverse("login"), {"username": "buyer", "password": "x"})
+        self.assertEqual(r.status_code, 302)
+        self.assertEqual(self.client.get("/health/").json()["status"], "ok")
+
+    def test_concurrent_numbering_uses_counter(self):
+        m1 = self.memo(self.initiator, [(self.paper, 1)], approve=False)
+        Memo.objects.filter(pk=m1.pk).delete()  # «дыра» в номерах не приводит к повтору
+        m2 = self.memo(self.initiator, [(self.paper, 1)], approve=False)
+        self.assertGreater(m2.number, m1.number)

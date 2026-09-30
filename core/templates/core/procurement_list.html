@@ -25,4 +25,5 @@
   </tr>
   {% empty %}<tr><td colspan="9" class="text-center muted py-4">Закупок нет</td></tr>{% endfor %}
 </table></div>
+{% include "core/_pagination.html" with page=procurements %}
 {% endblock %}

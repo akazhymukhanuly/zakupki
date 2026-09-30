@@ -1,8 +1,10 @@
 """Справочник поставщиков (остальные справочники — в /admin/)."""
 from django.contrib import messages
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 
 from .. import roles
+from ..refs_import import SHEETS, build_template, import_workbook
 from ..forms import SupplierForm
 from ..models import Category, Supplier
 
@@ -29,3 +31,21 @@ def supplier_edit(request, pk=None):
         messages.success(request, f"Поставщик «{s}» сохранён")
         return redirect("supplier_list")
     return render(request, "core/supplier_form.html", {"form": form, "obj": obj})
+
+
+@roles.require("refs.import")
+def refs_import(request):
+    """Загрузка справочников заказчика из Excel (для администратора)."""
+    report = None
+    if request.method == "POST" and request.FILES.get("file"):
+        dry_run = request.POST.get("mode") != "apply"
+        report = import_workbook(request.FILES["file"].read(), dry_run=dry_run)
+        report.dry_run = dry_run
+    return render(request, "core/refs_import.html", {"report": report, "sheets": SHEETS})
+
+
+@roles.require("refs.import")
+def refs_template(request):
+    resp = HttpResponse(build_template(), content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    resp["Content-Disposition"] = "attachment; filename*=UTF-8''%D0%A1%D0%BF%D1%80%D0%B0%D0%B2%D0%BE%D1%87%D0%BD%D0%B8%D0%BA%D0%B8.xlsx"
+    return resp

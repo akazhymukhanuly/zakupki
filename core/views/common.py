@@ -1,6 +1,7 @@
 from decimal import Decimal, InvalidOperation
 
 from django.contrib import messages
+from django.core.paginator import Paginator
 from django.shortcuts import redirect
 
 from ..services import BusinessError
@@ -38,3 +39,11 @@ def posint(value):
 
 def back(request, fallback):
     return redirect(request.POST.get("next") or request.META.get("HTTP_REFERER") or fallback)
+
+
+def paginate(request, qs, per_page=50):
+    """Страница списка + строка параметров без page (для ссылок пагинации)."""
+    page = Paginator(qs, per_page).get_page(request.GET.get("page"))
+    params = request.GET.copy()
+    params.pop("page", None)
+    return page, params.urlencode()

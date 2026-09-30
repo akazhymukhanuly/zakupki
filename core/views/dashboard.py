@@ -15,7 +15,7 @@ from ..models import (
     RFQ, Contract, ContractLine, DecisionLine, Department, Memo, MemoItem, Notification, Procurement, ProcurementLine,
     Quote, QuoteLine, Supplier,
 )
-from .common import attempt
+from .common import attempt, paginate
 from .procurements import _quote_rows, quote_groups
 
 S = MemoItem.Status
@@ -39,11 +39,10 @@ def dashboard(request):
     now = timezone.now()
     stale_days = services.cfg("POOL_STALE_DAYS")
     warn_days = services.cfg("DEADLINE_WARN_DAYS")
-    pool = services.pool_items()
-    stale = [i for i in pool if i.pool_since and (now - i.pool_since).days >= stale_days]
+    pool = services.pool_queryset()
+    stale = list(pool.filter(pool_since__lte=now - timedelta(days=stale_days)).order_by("pool_since")[:10])
     for i in stale:
         i.days_in_pool = (now - i.pool_since).days
-    urgent = [i for i in pool if i.urgent]
     kp_overdue = [p for p in Procurement.objects.filter(status__in=[Procurement.Status.RFQ, Procurement.Status.COLLECTING],
                                                          kp_deadline__lt=today) if p.is_overdue_kp]
     near = MemoItem.objects.filter(
@@ -51,19 +50,21 @@ def dashboard(request):
         status__in=[S.APPROVED, S.IN_PROCUREMENT, S.SUPPLIER_SELECTED, S.PARTIALLY_CONTRACTED],
     ).select_related("memo", "memo__department").order_by("required_date")
     my_procs = Procurement.objects.filter(buyer=request.user).exclude(
-        status__in=[Procurement.Status.CLOSED, Procurement.Status.CANCELLED]).prefetch_related("lines", "rfqs")
-    withdrawals = request.user.procurements.filter(withdrawalrequest__state="pending").distinct()
+        status__in=[Procurement.Status.CLOSED, Procurement.Status.CANCELLED]).order_by("-number")[:15]
     counters = {
-        "pool": len(pool),
-        "urgent": len(urgent),
+        "pool": pool.count(),
+        "urgent": pool.filter(urgent=True).count(),
         "in_procurement": MemoItem.objects.filter(status__in=[S.IN_PROCUREMENT, S.SUPPLIER_SELECTED]).count(),
         "contracted": MemoItem.objects.filter(status__in=[S.CONTRACTED, S.PARTIALLY_DELIVERED]).count(),
-        "overdue": sum(1 for i in MemoItem.objects.exclude(status__in=[S.DELIVERED, S.CLOSED, S.WITHDRAWN, S.REJECTED, S.DRAFT])
-                       .filter(required_date__lt=today)),
+        "overdue": MemoItem.objects.exclude(status__in=[S.DELIVERED, S.CLOSED, S.WITHDRAWN, S.REJECTED, S.DRAFT])
+        .filter(required_date__lt=today).count(),
     }
+    stale_count = pool.filter(pool_since__lte=now - timedelta(days=stale_days)).count()
+    near_count = near.count()
+    near = list(near[:12])
     return render(request, "core/dashboard.html", {
-        "stale": stale, "urgent": urgent, "kp_overdue": kp_overdue, "near": near, "my_procs": my_procs,
-        "counters": counters, "stale_days": stale_days, "warn_days": warn_days, "withdrawals": withdrawals,
+        "stale": stale, "stale_count": stale_count, "near_count": near_count, "kp_overdue": kp_overdue, "near": near, "my_procs": my_procs,
+        "counters": counters, "stale_days": stale_days, "warn_days": warn_days,
     })
 
 
@@ -230,8 +231,8 @@ def _report_excel(report, ctx):
 
 @login_required
 def notifications(request):
-    qs = request.user.notifications.all()[:200]
-    return render(request, "core/notifications.html", {"items": qs})
+    page, qs_params = paginate(request, request.user.notifications.all())
+    return render(request, "core/notifications.html", {"items": page, "qs_params": qs_params})
 
 
 @login_required

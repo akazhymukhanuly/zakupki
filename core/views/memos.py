@@ -15,7 +15,7 @@ from ..models import (
     DecisionApproval, DecisionLine, Department, Memo, MemoItem, MemoTemplate, MemoTemplateLine, Nomenclature,
     Procurement, WithdrawalRequest,
 )
-from .common import attempt, back
+from .common import attempt, back, paginate
 
 
 def visible_memos(user):
@@ -61,13 +61,13 @@ def memo_list(request):
         if q.isdigit():
             cond |= Q(number=int(q))
         qs = qs.filter(cond).distinct()
-    memos = list(qs)
     if f.get("status"):
-        memos = [m for m in memos if m.aggregate_status[0] == f["status"]]
+        qs = qs.filter(status_code=f["status"])
+    memos, qs_params = paginate(request, qs.order_by("-number"))
     statuses = [("draft", "Черновик"), ("on_approval", "На согласовании"), ("new", "Новая"), ("in_work", "В работе"),
                 ("problem", "Проблемная"), ("done", "Исполнена"), ("rejected", "Отклонена")]
     return render(request, "core/memo_list.html", {
-        "memos": memos, "departments": Department.objects.all(), "statuses": statuses, "f": f,
+        "memos": memos, "departments": Department.objects.all(), "statuses": statuses, "f": f, "qs_params": qs_params,
     })
 
 

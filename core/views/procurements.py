@@ -14,7 +14,7 @@ from ..forms import ProcurementForm, UploadForm
 from ..models import (
     RFQ, DecisionApproval, DecisionLine, Procurement, ProcurementLine, Quote, QuoteLine, Supplier, WithdrawalRequest,
 )
-from .common import attempt, dec, posint
+from .common import attempt, dec, paginate, posint
 
 TABS = [("items", "Позиции"), ("suppliers", "Поставщики и запросы"), ("quotes", "КП"), ("compare", "Сравнение"),
         ("decision", "Решение"), ("contracts", "Договоры"), ("history", "История")]
@@ -43,8 +43,9 @@ def procurement_list(request):
         qs = qs.exclude(status__in=[Procurement.Status.CLOSED, Procurement.Status.CANCELLED])
     if f.get("mine"):
         qs = qs.filter(buyer=request.user)
+    page, qs_params = paginate(request, qs)
     return render(request, "core/procurement_list.html", {
-        "procurements": qs, "statuses": Procurement.Status.choices, "f": f,
+        "procurements": page, "statuses": Procurement.Status.choices, "f": f, "qs_params": qs_params,
     })
 
 

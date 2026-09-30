@@ -44,6 +44,8 @@ urlpatterns = [
     # Справочники, отчёты, прочее
     path("suppliers/", refs.supplier_list, name="supplier_list"),
     path("suppliers/new/", refs.supplier_edit, name="supplier_create"),
+    path("import/", refs.refs_import, name="refs_import"),
+    path("import/template.xlsx", refs.refs_template, name="refs_template"),
     path("suppliers/<int:pk>/", refs.supplier_edit, name="supplier_edit"),
     path("reports/", dashboard.reports, name="reports"),
     path("notifications/", dashboard.notifications, name="notifications"),

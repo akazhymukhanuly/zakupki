@@ -14,4 +14,5 @@
   {% empty %}<div class="list-group-item muted text-center py-4">Уведомлений нет</div>{% endfor %}
 </div></div>
 <p class="small-muted mt-2">В MVP уведомления показываются внутри системы. Отправку на e-mail / в Telegram можно подключить на следующем этапе.</p>
+{% include "core/_pagination.html" with page=items %}
 {% endblock %}

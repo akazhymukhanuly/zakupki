@@ -11,12 +11,32 @@ from decimal import Decimal
 
 from django.conf import settings
 from django.contrib.auth.models import User
-from django.db import models
+from django.db import models, transaction
 from django.db.models import Sum
 from django.urls import reverse
 from django.utils import timezone
 
 ZERO = Decimal("0")
+
+
+# ---------------------------------------------------------------- Нумерация
+
+
+class Counter(models.Model):
+    """Счётчик номеров документов. Блокировка строки исключает дубли при одновременном создании."""
+
+    name = models.CharField(max_length=50, unique=True)
+    value = models.PositiveIntegerField(default=0)
+
+    @classmethod
+    def next(cls, name, start_from=None):
+        with transaction.atomic():
+            counter, created = cls.objects.select_for_update().get_or_create(name=name)
+            if created and start_from:
+                counter.value = start_from() or 0
+            counter.value += 1
+            counter.save(update_fields=["value"])
+            return counter.value
 
 
 # ---------------------------------------------------------------- Справочники
@@ -168,6 +188,7 @@ class Memo(models.Model):
         User, verbose_name="Согласующий", null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
     )
     approval_comment = models.TextField("Комментарий согласующего", blank=True)
+    status_code = models.CharField("Сводный статус", max_length=20, default="draft", db_index=True, editable=False)
     submitted_at = models.DateTimeField(null=True, blank=True)
     approved_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -182,8 +203,7 @@ class Memo(models.Model):
 
     def save(self, *args, **kwargs):
         if not self.number:
-            last = Memo.objects.aggregate(m=models.Max("number"))["m"] or 0
-            self.number = last + 1
+            self.number = Counter.next("memo", lambda: Memo.objects.aggregate(m=models.Max("number"))["m"])
         super().save(*args, **kwargs)
 
     def get_absolute_url(self):
@@ -221,8 +241,19 @@ class Memo(models.Model):
         parts = [f"{counts[g]} {label}" for g, label in self.SUMMARY_GROUPS if counts.get(g)]
         return f"{len(items)} поз.: " + ", ".join(parts) if parts else f"{len(items)} поз."
 
+    STATUS_LABELS = {
+        "draft": "Черновик", "on_approval": "На согласовании", "rejected": "Отклонена", "new": "Новая",
+        "in_work": "В работе", "done": "Исполнена", "problem": "Проблемная",
+    }
+
     @property
     def aggregate_status(self):
+        return (self.status_code, self.STATUS_LABELS.get(self.status_code, self.status_code))
+
+    def compute_status_code(self):
+        return self._aggregate_status()[0]
+
+    def _aggregate_status(self):
         """Укрупнённый статус для реестра."""
         if self.state == self.State.DRAFT:
             return ("draft", "Черновик")
@@ -302,6 +333,8 @@ class MemoItem(models.Model):
     closed = models.BooleanField(default=False)
     delivered_at = models.DateTimeField(null=True, blank=True)
     pool_note = models.CharField("Пометка в пуле", max_length=200, blank=True)
+    contracted_qty = models.DecimalField("В договорах", max_digits=14, decimal_places=3, default=0, editable=False)
+    delivered_qty = models.DecimalField("Поставлено", max_digits=14, decimal_places=3, default=0, editable=False)
     pool_since = models.DateTimeField(null=True, blank=True)
 
     class Meta:
@@ -319,14 +352,14 @@ class MemoItem(models.Model):
         return f"СЗ-{self.memo.number}/{self.line_no}"
 
     # --- Количественные показатели ---
-    @property
-    def contracted_qty(self):
+    # contracted_qty / delivered_qty хранятся в полях и обновляются services.recalc_item,
+    # чтобы списки не делали запросов на каждую позицию.
+    def calc_contracted_qty(self):
         return ContractLine.objects.filter(item=self).exclude(
             contract__status=Contract.Status.CANCELLED
         ).aggregate(s=Sum("quantity"))["s"] or ZERO
 
-    @property
-    def delivered_qty(self):
+    def calc_delivered_qty(self):
         return ReceiptLine.objects.filter(contract_line__item=self, confirmed=True).exclude(
             contract_line__contract__status=Contract.Status.CANCELLED
         ).aggregate(s=Sum("quantity"))["s"] or ZERO
@@ -435,8 +468,7 @@ class Procurement(models.Model):
 
     def save(self, *args, **kwargs):
         if not self.number:
-            last = Procurement.objects.aggregate(m=models.Max("number"))["m"] or 0
-            self.number = last + 1
+            self.number = Counter.next("procurement", lambda: Procurement.objects.aggregate(m=models.Max("number"))["m"])
         super().save(*args, **kwargs)
 
     def get_absolute_url(self):

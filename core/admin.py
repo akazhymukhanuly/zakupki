@@ -8,6 +8,31 @@ from .models import (
 )
 
 
+class ReadOnlyAdmin(admin.ModelAdmin):
+    """Документы меняются только через интерфейс системы — иначе нарушатся правила и статусы.
+    В админке их можно только смотреть."""
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+class ReadOnlyInline:
+    extra = 0
+    can_delete = False
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+
 class ProfileInline(admin.StackedInline):
     model = Profile
     can_delete = False
@@ -61,7 +86,7 @@ class MemoTemplateAdmin(admin.ModelAdmin):
     list_display = ["name", "owner", "department"]
 
 
-class MemoItemInline(admin.TabularInline):
+class MemoItemInline(ReadOnlyInline, admin.TabularInline):
     model = MemoItem
     extra = 0
     fields = ["line_no", "description", "quantity", "unit", "required_date", "status"]
@@ -69,46 +94,51 @@ class MemoItemInline(admin.TabularInline):
 
 
 @admin.register(Memo)
-class MemoAdmin(admin.ModelAdmin):
+class MemoAdmin(ReadOnlyAdmin):
     list_display = ["number", "department", "initiator", "state", "required_date"]
     list_filter = ["state", "department"]
     inlines = [MemoItemInline]
 
 
-class ProcurementLineInline(admin.TabularInline):
+class ProcurementLineInline(ReadOnlyInline, admin.TabularInline):
     model = ProcurementLine
     extra = 0
     readonly_fields = ["item", "quantity", "state"]
 
 
 @admin.register(Procurement)
-class ProcurementAdmin(admin.ModelAdmin):
+class ProcurementAdmin(ReadOnlyAdmin):
     list_display = ["number", "title", "buyer", "status", "decision_state"]
     list_filter = ["status"]
     inlines = [ProcurementLineInline]
 
 
-class ContractLineInline(admin.TabularInline):
+class ContractLineInline(ReadOnlyInline, admin.TabularInline):
     model = ContractLine
     extra = 0
 
 
 @admin.register(Contract)
-class ContractAdmin(admin.ModelAdmin):
+class ContractAdmin(ReadOnlyAdmin):
     list_display = ["number", "kind", "supplier", "status", "date"]
     list_filter = ["status", "kind"]
     inlines = [ContractLineInline]
 
 
-admin.site.register([BudgetItem, Category, Payment])
+admin.site.register([BudgetItem, Category])
 
 
-class ReceiptLineInline(admin.TabularInline):
+@admin.register(Payment)
+class PaymentAdmin(ReadOnlyAdmin):
+    list_display = ["contract", "date", "amount", "doc_number"]
+
+
+class ReceiptLineInline(ReadOnlyInline, admin.TabularInline):
     model = ReceiptLine
     extra = 0
 
 
 @admin.register(Receipt)
-class ReceiptAdmin(admin.ModelAdmin):
+class ReceiptAdmin(ReadOnlyAdmin):
     list_display = ["contract", "date", "doc_number"]
     inlines = [ReceiptLineInline]

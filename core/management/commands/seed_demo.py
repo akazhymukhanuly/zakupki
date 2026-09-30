@@ -8,7 +8,7 @@ from decimal import Decimal as D
 
 from django.contrib.auth.models import Group, User
 from django.core.management import call_command
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.utils import timezone
 
@@ -28,6 +28,9 @@ class Command(BaseCommand):
         parser.add_argument("--reset", action="store_true", help="Очистить базу перед заполнением")
 
     def handle(self, *args, **opts):
+        from django.conf import settings
+        if not settings.DEMO_MODE:
+            raise CommandError("Демо-данные заливаются только при DEMO_MODE=1 (не на боевом сервере).")
         if opts["reset"]:
             call_command("flush", "--noinput")
         if User.objects.filter(username="buyer").exists():

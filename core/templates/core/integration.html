@@ -13,6 +13,7 @@
   {% else %}
     <b>Загружено оплат: {{ report.payments }}.</b>
   {% endif %}
+  {% if report.skipped %}<div class="small">Пропущено как уже загруженные ранее: {{ report.skipped }}.</div>{% endif %}
   {% for e in report.errors %}<div class="small text-danger">{{ e }}</div>{% endfor %}
 </div>
 {% endif %}

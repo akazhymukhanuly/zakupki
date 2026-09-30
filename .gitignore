@@ -6,3 +6,6 @@ media/
 staticfiles/
 .claude/
 .DS_Store
+.env
+backups/
+exchange/

@@ -7,21 +7,25 @@ from collections import OrderedDict, defaultdict
 from datetime import timedelta
 from decimal import Decimal
 
+import logging
+
 from django.conf import settings
 from django.contrib.auth.models import User
+from django.core.mail import send_mail
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import F, Q
 from django.utils import timezone
 
 from . import roles
 from .models import (
-    ZERO, ApprovalRule, Contract, ContractLine, DecisionApproval, DecisionLine, HistoryEntry, Memo, MemoItem,
+    ZERO, ApprovalRule, Contract, Counter, ContractLine, DecisionApproval, DecisionLine, HistoryEntry, Memo, MemoItem,
     Notification, Payment, Procurement, ProcurementLine, Quote, QuoteLine, Receipt, ReceiptLine, ReminderLog, RFQ,
     Supplier, WithdrawalRequest,
 )
 
 S = MemoItem.Status
 P = Procurement.Status
+logger = logging.getLogger("core.services")
 
 
 class BusinessError(Exception):
@@ -46,10 +50,25 @@ def log(text, user=None, memo=None, procurement=None, contract=None):
 
 def notify(users, text, url=""):
     seen = set()
+    emails = []
     for u in users:
         if u and u.pk not in seen:
             seen.add(u.pk)
             Notification.objects.create(user=u, text=text, url=url)
+            if u.email:
+                emails.append(u.email)
+    if emails and settings.EMAIL_HOST:
+        # Письмо уходит только после успешной фиксации транзакции и никогда не ломает действие пользователя.
+        transaction.on_commit(lambda: _send_email(emails, text, url))
+
+
+def _send_email(emails, text, url):
+    link = f"{settings.SITE_URL}{url}" if url.startswith("/") else url
+    body = f"{text}\n\n{link}\n\n— Система «Закупки»" if link else text
+    try:
+        send_mail(f"Закупки: {text[:80]}", body, None, emails, fail_silently=False)
+    except Exception:  # noqa: BLE001
+        logger.exception("Не удалось отправить письмо %s", emails)
 
 
 def users_with_role(*role_names):
@@ -92,9 +111,14 @@ def compute_status(item):
     return S.APPROVED
 
 
-def recalc_item(item):
-    new = compute_status(item)
+def recalc_item(item, refresh_memo=True):
+    """Пересчитать количества и статус позиции (и сводный статус её СЗ)."""
     changed = []
+    contracted, delivered = item.calc_contracted_qty(), item.calc_delivered_qty()
+    if contracted != item.contracted_qty or delivered != item.delivered_qty:
+        item.contracted_qty, item.delivered_qty = contracted, delivered
+        changed += ["contracted_qty", "delivered_qty"]
+    new = compute_status(item)
     if new != item.status:
         item.status = new
         item.status_changed_at = timezone.now()
@@ -111,12 +135,25 @@ def recalc_item(item):
         changed.append("pool_since")
     if changed:
         item.save(update_fields=changed)
+    if refresh_memo:
+        recalc_memo(item.memo)
     return item
 
 
 def recalc_items(items):
+    memos = {}
     for item in items:
-        recalc_item(item)
+        recalc_item(item, refresh_memo=False)
+        memos[item.memo_id] = item.memo
+    for memo in memos.values():
+        recalc_memo(memo)
+
+
+def recalc_memo(memo):
+    code = memo.compute_status_code()
+    if code != memo.status_code:
+        memo.status_code = code
+        memo.save(update_fields=["status_code"])
 
 
 def pool_eligible(item):
@@ -128,17 +165,21 @@ def pool_eligible(item):
     )
 
 
-def pool_items():
+def pool_queryset():
     """Пул потребностей: утверждённые позиции с нераспределённым остатком."""
-    qs = (
+    return (
         MemoItem.objects.filter(
             memo__state__in=[Memo.State.APPROVED, Memo.State.PARTIALLY_APPROVED],
             rejected=False, withdrawn=False, closed=False, remainder_closed=False,
+            quantity__gt=F("contracted_qty"),
         )
         .exclude(procurement_lines__state=ProcurementLine.State.ACTIVE)
         .select_related("memo", "memo__department", "memo__initiator", "nomenclature", "category", "budget_item")
     )
-    return [i for i in qs if i.remaining_qty > 0]
+
+
+def pool_items():
+    return list(pool_queryset())
 
 
 # ---------------------------------------------------------------- СЗ (шаг 1)
@@ -161,7 +202,8 @@ def submit_memo(memo, user):
         memo.approver = memo.department.head
     memo.save()
     recalc_items(memo.items.all())
-    log(f"СЗ отправлена на согласование", user, memo=memo)
+    recalc_memo(memo)
+    log("СЗ отправлена на согласование", user, memo=memo)
     approvers = [memo.approver] if memo.approver else list(users_with_role(roles.APPROVER))
     notify(approvers, f"{memo} от {memo.initiator.get_full_name() or memo.initiator} ждёт согласования", memo.get_absolute_url())
 
@@ -193,6 +235,7 @@ def approve_memo(memo, user, rejected_items=None, comment=""):
     memo.approval_comment = comment
     memo.save()
     recalc_items(items)
+    recalc_memo(memo)
     log(f"СЗ согласована: {memo.get_state_display()}" + (f". {comment}" if comment else ""), user, memo=memo)
     notify([memo.initiator], f"{memo}: {memo.get_state_display().lower()}", memo.get_absolute_url())
     if approved:
@@ -211,6 +254,7 @@ def reject_memo(memo, user, comment):
     memo.approved_at = timezone.now()
     memo.save()
     recalc_items(memo.items.all())
+    recalc_memo(memo)
     log(f"СЗ отклонена: {comment}", user, memo=memo)
     notify([memo.initiator], f"{memo} отклонена: {comment}", memo.get_absolute_url())
 
@@ -223,6 +267,7 @@ def return_memo_to_draft(memo, user):
     memo.state = Memo.State.DRAFT
     memo.save()
     recalc_items(memo.items.all())
+    recalc_memo(memo)
     log("СЗ возвращена в черновик инициатором", user, memo=memo)
 
 
@@ -248,6 +293,7 @@ def copy_memo(memo, user):
 @transaction.atomic
 def withdraw_item(item, user, reason):
     """Отзыв позиции инициатором (п. 6.4)."""
+    item.refresh_from_db()
     if item.status in (S.WITHDRAWN, S.REJECTED, S.CLOSED):
         raise BusinessError("Позиция уже не активна.")
     if not item.memo.is_approved:
@@ -283,6 +329,7 @@ def resolve_withdrawal(req, user, approve):
     if req.state != WithdrawalRequest.State.PENDING:
         raise BusinessError("Запрос уже обработан.")
     item = req.item
+    item.refresh_from_db()
     req.state = WithdrawalRequest.State.APPROVED if approve else WithdrawalRequest.State.REJECTED
     req.resolved_by = user
     req.resolved_at = timezone.now()
@@ -310,6 +357,7 @@ def resolve_withdrawal(req, user, approve):
 
 @transaction.atomic
 def close_item(item, user):
+    item.refresh_from_db()
     if item.status != S.DELIVERED:
         raise BusinessError("Закрыть можно только полностью поставленную позицию.")
     item.closed = True
@@ -718,12 +766,18 @@ def active_framework(supplier):
     ).filter(Q(valid_until__isnull=True) | Q(valid_until__gte=today)).order_by("-date").first()
 
 
-def next_contract_number():
+def next_contract_number(reserve=True):
+    """Номер договора Д-ГГГГ-NNNN. reserve=False — только подсказка для формы, счётчик не тратится."""
     year = timezone.localdate().year
-    n = Contract.objects.filter(number__startswith=f"Д-{year}-").count() + 1
-    while Contract.objects.filter(number=f"Д-{year}-{n:04d}").exists():
-        n += 1
-    return f"Д-{year}-{n:04d}"
+    prefix = f"Д-{year}-"
+    existing = lambda: Contract.objects.filter(number__startswith=prefix).count()
+    if not reserve:
+        n = existing() + 1
+    else:
+        n = Counter.next(f"contract-{year}", existing)
+    while Contract.objects.filter(number=f"{prefix}{n:04d}").exists():
+        n = Counter.next(f"contract-{year}") if reserve else n + 1
+    return f"{prefix}{n:04d}"
 
 
 def contract_proposals(proc):
@@ -747,7 +801,7 @@ def contract_proposals(proc):
 
 def check_contract_qty(item, extra_qty):
     """Правило: сумма по строкам договоров ≤ количества позиции (иначе — предупреждение)."""
-    return item.contracted_qty + extra_qty <= item.quantity
+    return item.calc_contracted_qty() + extra_qty <= item.quantity
 
 
 @transaction.atomic
@@ -801,12 +855,11 @@ def _finish_contracting(proc, user):
     for line in proc.lines.filter(state=ProcurementLine.State.ACTIVE).select_related("item"):
         line.state = ProcurementLine.State.DONE
         line.save(update_fields=["state"])
-        item = line.item
+        item = recalc_item(line.item)
         if item.remaining_qty > 0:
             # п. 6.2: остаток автоматически возвращается в пул как остаток той же позиции.
             item.pool_note = f"остаток от закупки №{proc.number}"
             item.save(update_fields=["pool_note"])
-        recalc_item(item)
         memo_items = item.memo
         log(f"Позиция {item.code}: в договоре {fmt_qty(item.contracted_qty)} из {fmt_qty(item.quantity)}", user, memo=memo_items)
     initiators = {}
@@ -930,6 +983,10 @@ def run_periodic(now=None):
         recalc_item(item)
         log(f"Позиция {item.code} закрыта автоматически через {cfg('AUTO_CLOSE_DAYS')} дн. после поставки", memo=item.memo)
         result["auto_closed"] += 1
+
+    # «Проблемная» зависит от даты — пересчитываем незавершённые СЗ.
+    for memo in Memo.objects.exclude(status_code__in=["done", "rejected", "draft"]):
+        recalc_memo(memo)
 
     sla = now - timedelta(days=cfg("URGENT_SLA_DAYS"))
     buyers = list(users_with_role(roles.BUYER))

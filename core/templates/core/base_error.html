@@ -1,0 +1,5 @@
+{% load static %}<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>Ошибка {% block code %}{% endblock %}</title>
+<link href="{% static 'vendor/bootstrap/bootstrap.min.css' %}" rel="stylesheet"></head>
+<body class="d-flex align-items-center justify-content-center" style="min-height:90vh;background:#f4f6f9">
+<div class="text-center" style="max-width:520px"><h1 class="display-3" style="color:#1f3a5f">{% block title_code %}Ошибка{% endblock %}</h1>
+<p class="fs-5">{% block msg %}{% endblock %}</p><a class="btn btn-primary" href="/">На главную</a></div></body></html>
