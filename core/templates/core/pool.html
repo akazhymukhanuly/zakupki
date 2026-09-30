@@ -1,0 +1,102 @@
+{% extends "core/base.html" %}{% load core_tags %}
+{% block title %}Пул потребностей{% endblock %}
+{% block content %}
+<div class="d-flex align-items-center mb-3">
+  <h1 class="page-title flex-grow-1">Пул потребностей <span class="fs-6 muted">{{ count }} поз.</span></h1>
+  {% if dup_count %}<span class="badge st-warning fs-6"><i class="bi bi-intersect"></i> {{ dup_count }} поз. — кандидаты на консолидацию</span>{% endif %}
+</div>
+<form class="card card-body mb-3 py-2">
+  <div class="row g-2 align-items-end">
+    <div class="col-md-2"><input name="q" value="{{ f.q }}" class="form-control form-control-sm" placeholder="Поиск"></div>
+    <div class="col-md-2"><select name="category" class="form-select form-select-sm"><option value="">Все категории</option>
+      {% for c in categories %}<option value="{{ c.pk }}" {% if f.category == c.pk|stringformat:"s" %}selected{% endif %}>{{ c }}</option>{% endfor %}</select></div>
+    <div class="col-md-2"><select name="department" class="form-select form-select-sm"><option value="">Все подразделения</option>
+      {% for d in departments %}<option value="{{ d.pk }}" {% if f.department == d.pk|stringformat:"s" %}selected{% endif %}>{{ d }}</option>{% endfor %}</select></div>
+    <div class="col-md-2"><select name="budget" class="form-select form-select-sm"><option value="">Все статьи бюджета</option>
+      {% for b in budgets %}<option value="{{ b.pk }}" {% if f.budget == b.pk|stringformat:"s" %}selected{% endif %}>{{ b }}</option>{% endfor %}</select></div>
+    <div class="col-md-1"><select name="due" class="form-select form-select-sm"><option value="">Срок</option>
+      <option value="7" {% if f.due == '7' %}selected{% endif %}>≤ 7 дн.</option><option value="14" {% if f.due == '14' %}selected{% endif %}>≤ 14 дн.</option><option value="30" {% if f.due == '30' %}selected{% endif %}>≤ 30 дн.</option></select></div>
+    <div class="col-md-1"><div class="form-check"><input class="form-check-input" type="checkbox" name="urgent" value="1" id="urg" {% if f.urgent %}checked{% endif %}><label for="urg" class="form-check-label small">Срочные</label></div></div>
+    <div class="col-md-1"><select name="group" class="form-select form-select-sm"><option value="category" {% if group == 'category' %}selected{% endif %}>По категории</option><option value="none" {% if group != 'category' %}selected{% endif %}>Без групп</option></select></div>
+    <div class="col-md-1"><button class="btn btn-sm btn-outline-primary w-100">Фильтр</button></div>
+  </div>
+</form>
+
+<form method="post" action="{% url 'pool_create_procurement' %}" id="poolForm">{% csrf_token %}
+{% for gname, items in groups.items %}
+<div class="card mb-3">
+  <div class="card-header d-flex align-items-center gap-2">
+    <input type="checkbox" class="form-check-input grp-toggle" data-grp="g{{ forloop.counter }}">
+    <span>{{ gname }}</span><span class="badge st-secondary">{{ items|length }}</span>
+  </div>
+  <div class="table-responsive">
+  <table class="table table-sm table-hover mb-0">
+    <thead><tr><th style="width:30px"></th><th>Позиция</th><th>Наименование</th><th class="num">Остаток</th><th>Требуемый срок</th><th>Подразделение</th><th>Инициатор</th><th>Статья</th><th class="num">В пуле</th></tr></thead>
+    <tbody>
+    {% for i in items %}
+    <tr class="{% if i.urgent %}row-urgent{% endif %} {% if i.is_dup %}row-dup{% endif %}">
+      <td><input type="checkbox" class="form-check-input g{{ forloop.parentloop.counter }} item-cb" name="items" value="{{ i.pk }}" data-nom="{{ i.nomenclature_id|default:'' }}"></td>
+      <td class="text-nowrap"><a href="{{ i.memo.get_absolute_url }}">{{ i.code }}</a></td>
+      <td>{{ i.description }}
+        {% if i.urgent %}<span class="badge bg-danger">срочно</span>{% endif %}
+        {% if i.is_dup %}<span class="dup-mark" title="Такая же номенклатура есть в других СЗ"><i class="bi bi-intersect"></i> дубль</span>{% endif %}
+        {% if i.pool_note %}<div class="small-muted"><i>{{ i.pool_note }}</i></div>{% endif %}
+      </td>
+      <td class="num">{{ i.remaining_qty|qty }} {{ i.unit }}{% if i.remaining_qty != i.quantity %}<div class="small-muted">из {{ i.quantity|qty }}</div>{% endif %}</td>
+      <td class="text-nowrap {% if i.is_overdue %}text-danger fw-semibold{% endif %}">{{ i.required_date|date:"d.m.Y" }}</td>
+      <td>{{ i.memo.department }}</td>
+      <td>{{ i.memo.initiator.get_full_name }}</td>
+      <td class="small">{{ i.budget_item.code|default:"—" }}</td>
+      <td class="num {% if i.is_stale %}text-danger fw-semibold{% endif %}">{{ i.days_in_pool }} дн.</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% empty %}
+<div class="card card-body text-center muted py-5">Пул пуст — все утверждённые позиции распределены по закупкам.</div>
+{% endfor %}
+
+{% if perm.procurement_manage and count %}
+<div class="sel-bar rounded">
+  <div class="d-flex flex-wrap gap-2 align-items-end">
+    <div><div class="small-muted">Выбрано</div><div class="fs-5 fw-bold lh-1" id="selCount">0</div></div>
+    <button type="button" class="btn btn-sm btn-outline-warning" id="selDups" title="Отметить все дубли номенклатуры"><i class="bi bi-intersect"></i> Выбрать дубли</button>
+    <div style="width:210px"><label class="form-label small mb-0">Куда</label>
+      <select name="target" class="form-select form-select-sm" id="target">
+        <option value="new">Новая закупка</option>
+        {% for p in open_procs %}<option value="{{ p.pk }}">в закупку №{{ p.number }} {{ p.title|truncatechars:30 }}</option>{% endfor %}
+      </select></div>
+    <div class="new-only" style="width:220px"><label class="form-label small mb-0">Наименование</label><input name="title" class="form-control form-control-sm" placeholder="Авто по категориям"></div>
+    <div class="new-only" style="width:190px"><label class="form-label small mb-0">Способ</label>{{ form.method }}</div>
+    <div class="new-only" style="width:160px"><label class="form-label small mb-0">Ответственный</label>{{ form.buyer }}</div>
+    <div class="new-only" style="width:150px"><label class="form-label small mb-0">Срок сбора КП</label>{{ form.kp_deadline }}</div>
+    <button class="btn btn-primary btn-sm ms-auto" id="createBtn" disabled><i class="bi bi-kanban"></i> Создать закупку из выбранных</button>
+  </div>
+</div>
+{% endif %}
+</form>
+{% endblock %}
+{% block scripts %}
+<script>
+document.querySelectorAll('#poolForm select, #poolForm input[type=date]').forEach(el => el.classList.add('form-select-sm','form-control-sm'));
+const cbs = [...document.querySelectorAll('.item-cb')];
+const upd = () => {
+  const n = cbs.filter(c => c.checked).length;
+  const el = document.getElementById('selCount'); if (el) el.textContent = n;
+  const b = document.getElementById('createBtn'); if (b) b.disabled = !n;
+};
+cbs.forEach(c => c.addEventListener('change', upd));
+document.querySelectorAll('.grp-toggle').forEach(t => t.addEventListener('change', () => {
+  document.querySelectorAll('.' + t.dataset.grp).forEach(c => c.checked = t.checked); upd();
+}));
+const sd = document.getElementById('selDups');
+if (sd) sd.addEventListener('click', () => { cbs.forEach(c => { if (c.closest('tr').classList.contains('row-dup')) c.checked = true; }); upd(); });
+const tg = document.getElementById('target');
+if (tg) tg.addEventListener('change', () => {
+  document.querySelectorAll('.new-only').forEach(e => e.style.display = tg.value === 'new' ? '' : 'none');
+  document.getElementById('createBtn').innerHTML = tg.value === 'new' ? '<i class="bi bi-kanban"></i> Создать закупку из выбранных' : '<i class="bi bi-plus"></i> Добавить в закупку';
+});
+</script>
+{% endblock %}

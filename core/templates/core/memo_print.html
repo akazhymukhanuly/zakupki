@@ -1,0 +1,60 @@
+{% load core_tags %}<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><title>Служебная записка №{{ memo.number }}</title>
+<style>
+  body { font-family: "Times New Roman", serif; font-size: 13pt; max-width: 800px; margin: 30px auto; color: #000; line-height: 1.35; }
+  table { width: 100%; border-collapse: collapse; margin: 14px 0; }
+  th, td { border: 1px solid #000; padding: 4px 6px; font-size: 11pt; vertical-align: top; }
+  th { background: #eee; }
+  .num { text-align: right; white-space: nowrap; }
+  .right { text-align: right; margin-left: 50%; }
+  .rej td { color: #777; text-decoration: line-through; }
+  .sign { margin-top: 36px; display: flex; justify-content: space-between; }
+  .sign div { width: 45%; }
+  .line { border-bottom: 1px solid #000; height: 22px; margin-bottom: 2px; }
+  .small { font-size: 10pt; }
+  .noprint { margin-bottom: 20px; font-family: sans-serif; font-size: 11pt; }
+  @media print { .noprint { display: none; } body { margin: 0 auto; } }
+</style></head>
+<body>
+<div class="noprint"><button onclick="print()">Печать / Сохранить в PDF</button> <a href="{{ memo.get_absolute_url }}">← к СЗ</a></div>
+
+<div class="right">
+  Руководителю подразделения «{{ memo.department }}»<br>{% if addressee %}{{ addressee }}<br>{% endif %}
+  от {% if position %}{{ position|lower }} {% endif %}{{ memo.initiator.get_full_name|default:memo.initiator }}
+</div>
+
+<h3 style="text-align:center;margin-top:28px">СЛУЖЕБНАЯ ЗАПИСКА<br>№ {{ memo.number }} от {{ memo.submitted_at|default:memo.created_at|date:"d.m.Y" }}</h3>
+
+<p>{{ memo.justification|linebreaksbr }}</p>
+<p>Прошу организовать приобретение следующих товаров (работ, услуг) в срок до <b>{{ memo.required_date|date:"d.m.Y" }}</b>:</p>
+
+<table>
+  <tr><th>№</th><th>Наименование</th><th>Ед.</th><th>Кол-во</th><th>Требуемый срок</th><th>Статья бюджета</th><th>Ориент. цена</th><th>Сумма</th></tr>
+  {% for i in items %}
+  <tr class="{% if i.rejected %}rej{% endif %}">
+    <td>{{ i.line_no }}</td>
+    <td>{{ i.description }}{% if i.urgent %} <b>(срочно)</b>{% endif %}</td>
+    <td>{{ i.unit }}</td><td class="num">{{ i.quantity|qty }}</td>
+    <td>{{ i.required_date|date:"d.m.Y" }}</td><td>{{ i.budget_item.code|default:"" }}</td>
+    <td class="num">{% if i.estimated_price %}{{ i.estimated_price|money }}{% endif %}</td>
+    <td class="num">{% if i.est_amount %}{{ i.est_amount|money }}{% endif %}</td>
+  </tr>
+  {% if i.rejected %}<tr><td></td><td colspan="7" class="small">Позиция отклонена: {{ i.reject_comment }}</td></tr>{% endif %}
+  {% endfor %}
+  {% if total %}<tr><td colspan="7"><b>Итого ориентировочно</b></td><td class="num"><b>{{ total|money }} {% cur %}</b></td></tr>{% endif %}
+</table>
+
+<div class="sign">
+  <div>Инициатор<div class="line"></div><span class="small">{{ memo.initiator.get_full_name }} / подпись</span></div>
+  <div>
+    {% if memo.is_approved or memo.state == 'rejected' %}
+      {% if memo.state == 'rejected' %}ОТКЛОНЕНО{% elif memo.state == 'partially_approved' %}СОГЛАСОВАНО ЧАСТИЧНО{% else %}СОГЛАСОВАНО{% endif %}
+      <div class="line"></div>
+      <span class="small">{{ memo.approver.get_full_name }}, {{ memo.approved_at|date:"d.m.Y H:i" }}{% if memo.approval_comment %}<br>{{ memo.approval_comment }}{% endif %}</span>
+    {% else %}
+      Согласовано<div class="line"></div><span class="small">{{ memo.approver.get_full_name|default:addressee }} / подпись, дата</span>
+    {% endif %}
+  </div>
+</div>
+<p class="small" style="margin-top:30px">Статус в системе: {{ memo.get_state_display }}. Документ сформирован {% now "d.m.Y H:i" %}.</p>
+</body></html>

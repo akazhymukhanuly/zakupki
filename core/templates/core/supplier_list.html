@@ -1,0 +1,22 @@
+{% extends "core/base.html" %}
+{% block title %}Поставщики{% endblock %}
+{% block content %}
+<div class="d-flex align-items-center mb-3">
+  <h1 class="page-title flex-grow-1">Поставщики</h1>
+  {% if manage %}<a class="btn btn-primary" href="{% url 'supplier_create' %}"><i class="bi bi-plus"></i> Добавить</a>{% endif %}
+</div>
+<form class="card card-body mb-3 py-2"><div class="row g-2">
+  <div class="col-md-4"><input name="q" value="{{ f.q }}" class="form-control form-control-sm" placeholder="Название"></div>
+  <div class="col-md-4"><select name="category" class="form-select form-select-sm"><option value="">Все категории</option>
+    {% for c in categories %}<option value="{{ c.pk }}" {% if f.category == c.pk|stringformat:"s" %}selected{% endif %}>{{ c }}</option>{% endfor %}</select></div>
+  <div class="col-md-2"><button class="btn btn-sm btn-outline-primary w-100">Найти</button></div>
+</div></form>
+<div class="card"><table class="table table-sm table-hover mb-0">
+  <thead><tr><th>Наименование</th><th>БИН</th><th>Контакты</th><th>Категории</th><th></th></tr></thead>
+  {% for s in suppliers %}
+  <tr><td>{{ s.name }}</td><td>{{ s.bin }}</td><td class="small">{{ s.contact }} {{ s.email }} {{ s.phone }}</td>
+    <td class="small">{% for c in s.categories.all %}<span class="badge st-secondary">{{ c }}</span> {% endfor %}</td>
+    <td class="text-end">{% if manage %}<a href="{% url 'supplier_edit' s.pk %}" class="btn btn-sm btn-link"><i class="bi bi-pencil"></i></a>{% endif %}</td></tr>
+  {% empty %}<tr><td colspan="5" class="muted text-center py-3">Нет поставщиков</td></tr>{% endfor %}
+</table></div>
+{% endblock %}

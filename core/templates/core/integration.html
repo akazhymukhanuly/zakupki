@@ -1,0 +1,70 @@
+{% extends "core/base.html" %}{% load core_tags %}
+{% block title %}Обмен с 1С{% endblock %}
+{% block content %}
+<h1 class="page-title mb-1">Обмен с 1С</h1>
+<p class="muted mb-3">Файловый обмен: договоры выгружаются со спецификацией построчно, в каждой строке — ID позиции (<code>СЗ-12/3</code>). Поступления и оплаты загружаются обратно и разносятся по позициям.</p>
+
+{% if report %}
+<div class="alert {% if report.errors %}alert-warning{% else %}alert-success{% endif %}">
+  {% if report.kind == 'receipts' %}
+    <b>Загружено документов поступления: {{ report.docs }}.</b>
+    Строк сопоставлено по ID позиции: {{ report.by_id }}; по номенклатуре (ждут подтверждения): {{ report.by_nomenclature }}; не найдено (разнести вручную): {{ report.unmatched }}.
+    {% if report.by_nomenclature or report.unmatched %}<div class="small">Подтвердить сопоставление можно в карточке договора → вкладка «Поступления».</div>{% endif %}
+  {% else %}
+    <b>Загружено оплат: {{ report.payments }}.</b>
+  {% endif %}
+  {% for e in report.errors %}<div class="small text-danger">{{ e }}</div>{% endfor %}
+</div>
+{% endif %}
+
+<div class="row g-3">
+<div class="col-lg-7">
+  <div class="card">
+    <div class="card-header">1. Выгрузка договоров в 1С</div>
+    <form method="post">{% csrf_token %}<input type="hidden" name="kind" value="export">
+    <div class="table-responsive" style="max-height:420px">
+    <table class="table table-sm mb-0">
+      <thead><tr><th><input type="checkbox" class="form-check-input" onclick="document.querySelectorAll('.ex-cb').forEach(c=>c.checked=this.checked)"></th><th>Договор</th><th>Поставщик</th><th class="num">Сумма</th><th>Статус</th><th>Выгружен</th></tr></thead>
+      {% for c in contracts %}
+      <tr><td><input type="checkbox" class="form-check-input ex-cb" name="contracts" value="{{ c.pk }}"></td>
+        <td><a href="{{ c.get_absolute_url }}">{{ c.number }}</a></td><td>{{ c.supplier.name }}</td><td class="num">{{ c.amount|money }}</td>
+        <td>{% badge c.status c.get_status_display %}</td><td class="small">{{ c.exported_1c_at|date:"d.m.Y H:i"|default:"—" }}</td></tr>
+      {% empty %}<tr><td colspan="6" class="muted text-center py-3">Нет подписанных договоров</td></tr>{% endfor %}
+    </table>
+    </div>
+    <div class="card-body d-flex gap-2 align-items-center flex-wrap">
+      <select name="format" class="form-select form-select-sm" style="width:120px"><option value="xml">XML</option><option value="json">JSON</option><option value="xlsx">Excel</option></select>
+      <div class="form-check"><input class="form-check-input" type="checkbox" name="collapse" value="1" id="col" {% if collapse_default %}checked{% endif %}>
+        <label class="form-check-label small" for="col" title="п. 6.1: одинаковая номенклатура из разных СЗ по одной цене — одной строкой, ID позиций через «;»">Сворачивать одинаковые позиции в одну строку</label></div>
+      <button class="btn btn-sm btn-success ms-auto"><i class="bi bi-download"></i> Выгрузить (не отмечено — все невыгруженные подписанные)</button>
+    </div>
+    </form>
+  </div>
+</div>
+<div class="col-lg-5">
+  <div class="card mb-3">
+    <div class="card-header">2. Загрузка поступлений ТМЦ / актов</div>
+    <div class="card-body">
+      <form method="post" enctype="multipart/form-data">{% csrf_token %}<input type="hidden" name="kind" value="receipts">
+        <input type="file" name="file" class="form-control form-control-sm mb-2" accept=".xlsx,.csv,.json,.xml" required>
+        <button class="btn btn-sm btn-primary"><i class="bi bi-upload"></i> Загрузить поступления</button>
+        <a class="btn btn-sm btn-link" href="{% url 'integration_template' 'receipts' %}">Шаблон</a>
+      </form>
+      <div class="small-muted mt-2">Колонки: {{ receipt_columns|join:", " }}.<br>
+        Сопоставление: по <b>IDПозиции</b> — автоматически; иначе по номенклатуре в договоре — с ручным подтверждением.</div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">3. Загрузка оплат</div>
+    <div class="card-body">
+      <form method="post" enctype="multipart/form-data">{% csrf_token %}<input type="hidden" name="kind" value="payments">
+        <input type="file" name="file" class="form-control form-control-sm mb-2" accept=".xlsx,.csv,.json,.xml" required>
+        <button class="btn btn-sm btn-primary"><i class="bi bi-upload"></i> Загрузить оплаты</button>
+        <a class="btn btn-sm btn-link" href="{% url 'integration_template' 'payments' %}">Шаблон</a>
+      </form>
+      <div class="small-muted mt-2">Колонки: {{ payment_columns|join:", " }}. Оплата — по договору целиком; на позиции распределяется пропорционально (справочно).</div>
+    </div>
+  </div>
+</div>
+</div>
+{% endblock %}

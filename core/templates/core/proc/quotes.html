@@ -1,0 +1,28 @@
+{% load core_tags %}
+<div class="card mb-3">
+  <div class="card-header d-flex align-items-center"><span class="flex-grow-1">Полученные КП</span>
+    {% if manage and proc.status == 'collecting' or manage and proc.status == 'rfq' %}
+    <form method="post" action="{% url 'procurement_action' proc.pk 'analysis' %}">{% csrf_token %}<button class="btn btn-sm btn-primary">Завершить сбор → Анализ</button></form>
+    {% endif %}
+  </div>
+  <table class="table table-sm mb-0">
+    <thead><tr><th>Поставщик</th><th>Получено</th><th>Источник</th><th>Покрыто позиций</th><th class="num">Сумма КП</th><th>Действует до</th><th>Условия оплаты</th><th></th></tr></thead>
+    {% for t in cmp.totals %}
+    <tr>
+      <td>{{ t.quote.supplier.name }}</td>
+      <td class="small">{{ t.quote.received_at|date:"d.m.Y H:i" }}</td>
+      <td class="small">{{ t.quote.get_source_display }}</td>
+      <td>{{ t.covered }} из {{ cmp.line_count }} {% if t.full %}<span class="badge st-success">полное</span>{% else %}<span class="badge st-warning">частичное</span>{% endif %}</td>
+      <td class="num">{{ t.total|money }} {% cur %}</td>
+      <td>{{ t.quote.valid_until|date:"d.m.Y"|default:"—" }}</td>
+      <td class="small">{{ t.quote.payment_terms|default:"—" }}</td>
+      <td class="text-end">{% if manage %}<a class="btn btn-sm btn-outline-primary" href="{% url 'quote_entry' proc.pk t.quote.rfq_id %}">Открыть</a>{% endif %}</td>
+    </tr>
+    {% empty %}<tr><td colspan="8" class="text-center muted py-3">КП ещё нет. Введите их на вкладке «Поставщики и запросы» или дождитесь, пока поставщики заполнят по ссылке.</td></tr>{% endfor %}
+  </table>
+</div>
+{% if rfqs and manage %}
+<div class="card"><div class="card-header">Ожидаем ответ</div><div class="card-body">
+  {% for r in rfqs %}{% if not r.has_quote %}<a href="{% url 'quote_entry' proc.pk r.pk %}" class="btn btn-sm btn-outline-secondary me-1 mb-1">{{ r.supplier.name }} — ввести КП</a>{% endif %}{% endfor %}
+</div></div>
+{% endif %}

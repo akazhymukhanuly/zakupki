@@ -1,0 +1,20 @@
+{% extends "core/base.html" %}
+{% block title %}Позиция{% endblock %}
+{% block content %}
+<h1 class="page-title mb-3">{% if item %}Позиция {{ item.code }}{% else %}Новая позиция{% endif %} — {{ memo }}</h1>
+<div class="card" style="max-width:760px"><div class="card-body">
+<form method="post">{% csrf_token %}
+  {% for e in form.non_field_errors %}<div class="alert alert-danger py-2">{{ e }}</div>{% endfor %}
+  <div class="row g-3">
+  {% for field in form %}
+    <div class="{% if field.name == 'description' or field.name == 'nomenclature' %}col-12{% else %}col-md-6{% endif %}">
+      {% if field.name == 'urgent' %}<div class="form-check mt-4">{{ field }} <label class="form-check-label">{{ field.label }}</label></div>
+      {% else %}<label class="form-label">{{ field.label }}</label>{{ field }}{% endif %}
+      {% for e in field.errors %}<div class="text-danger small">{{ e }}</div>{% endfor %}
+    </div>
+  {% endfor %}
+  </div>
+  <div class="mt-3"><button class="btn btn-primary">Сохранить</button> <a class="btn btn-link" href="{{ memo.get_absolute_url }}">Отмена</a></div>
+</form>
+</div></div>
+{% endblock %}

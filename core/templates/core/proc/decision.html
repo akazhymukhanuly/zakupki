@@ -1,0 +1,119 @@
+{% load core_tags %}
+{% if proc.decision_state == 'rejected' %}
+<div class="alert alert-danger">Решение отклонено: {{ proc.decision_comment }}. Скорректируйте и отправьте повторно.</div>
+{% endif %}
+
+{% if my_approvals %}
+<div class="card border-primary mb-3"><div class="card-body">
+  <h6>Ваше согласование ({% for a in my_approvals %}{{ a.role }}{% if not forloop.last %}, {% endif %}{% endfor %})</h6>
+  <p class="mb-2">Сумма решения: <b>{{ proc.decision_total|money }} {% cur %}</b></p>
+  {% for a in my_approvals %}
+  <form method="post" action="{% url 'decision_approve' a.pk %}" class="d-flex gap-2">{% csrf_token %}
+    <input name="comment" class="form-control" placeholder="Комментарий">
+    <button name="approve" value="1" class="btn btn-success text-nowrap">Согласовать</button>
+    <button name="approve" value="0" class="btn btn-outline-danger text-nowrap">Отклонить</button>
+  </form>
+  {% endfor %}
+</div></div>
+{% endif %}
+
+{% if not cmp.quotes %}
+<div class="card card-body text-center muted py-5">Нет КП — решение сформировать нельзя</div>
+{% else %}
+
+{% if manage and can_edit_decision %}
+<div class="card mb-3"><div class="card-body d-flex gap-2 flex-wrap align-items-center">
+  <span class="small-muted me-2">Быстрые варианты:</span>
+  <form method="post" action="{% url 'procurement_action' proc.pk 'preset' %}">{% csrf_token %}<button class="btn btn-sm btn-outline-primary">Лучший по каждой строке</button></form>
+  {% for q in cmp.quotes %}
+  <form method="post" action="{% url 'procurement_action' proc.pk 'preset' %}">{% csrf_token %}<input type="hidden" name="quote" value="{{ q.pk }}"><button class="btn btn-sm btn-outline-secondary">Всё у «{{ q.supplier.name }}»</button></form>
+  {% endfor %}
+  <span class="small-muted ms-2">или вручную: укажите количество в ячейках (можно делить позицию между поставщиками). Пустая строка — «вернуть в пул».</span>
+</div></div>
+{% endif %}
+
+<form method="post" action="{% url 'procurement_action' proc.pk 'decision' %}">{% csrf_token %}
+<div class="card mb-3"><div class="table-responsive">
+<table class="table table-sm table-bordered mb-0 cmp-table">
+  <thead><tr><th class="pos sticky-col">Позиция</th><th class="num">Нужно</th>
+    {% for q in cmp.quotes %}<th class="text-center">{{ q.supplier.name }}</th>{% endfor %}<th class="num">Распределено</th></tr></thead>
+  <tbody>
+  {% for row in cmp.rows %}
+  <tr>
+    <td class="pos sticky-col">{{ row.line.item.code }} {{ row.line.item.description }}</td>
+    <td class="num">{{ row.line.quantity|qty }} {{ row.line.item.unit }}</td>
+    {% for c in row.cells %}
+    <td class="{% if c.is_min %}cell-best{% endif %}">
+      {% if c.ql and not c.ql.not_offered and c.ql.price is not None %}
+        <div class="d-flex align-items-center gap-1 justify-content-end">
+          <span class="small price-pick" role="button" title="Назначить всё количество этому поставщику" data-line="{{ row.line.pk }}" data-qty="{% if c.ql.offered_qty %}{{ c.ql.offered_qty }}{% else %}{{ row.line.quantity }}{% endif %}">{{ c.ql.price|money }}</span>
+          {% if manage and can_edit_decision %}
+          <input class="form-control form-control-sm qty-input dq line-{{ row.line.pk }}" name="qty_{{ row.line.pk }}_{{ c.ql.pk }}" value="{{ c.qty|default_if_none:''|qty }}" placeholder="0">
+          {% else %}<b class="ms-2">{{ c.qty|default_if_none:""|qty }}</b>{% endif %}
+        </div>
+        {% if c.ql.is_analog %}<div class="cell-analog text-end">аналог: {{ c.ql.analog_description }}</div>{% endif %}
+      {% else %}<span class="muted small">—</span>{% endif %}
+    </td>
+    {% endfor %}
+    <td class="num {% if row.decided > row.line.quantity %}text-danger fw-bold{% elif row.decided == row.line.quantity %}text-success{% elif not row.decided %}text-secondary{% else %}text-warning{% endif %}">
+      {{ row.decided|qty }}{% if not row.decided %}<div class="small-muted">→ в пул</div>{% elif row.decided < row.line.quantity %}<div class="small-muted">остаток → в пул</div>{% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div></div>
+{% if manage and can_edit_decision %}
+<div class="d-flex gap-3 align-items-center mb-3">
+  <button class="btn btn-primary">Сохранить решение</button>
+  <div class="form-check"><input class="form-check-input" type="checkbox" name="allow_over" value="1" id="ao"><label for="ao" class="form-check-label small">Подтверждаю превышение количества (например, минимальная партия)</label></div>
+</div>
+{% endif %}
+</form>
+{% endif %}
+
+{% if decision_lines %}
+<div class="row g-3">
+<div class="col-lg-7">
+<div class="card"><div class="card-header">Итог решения</div>
+<table class="table table-sm mb-0">
+  <thead><tr><th>Поставщик</th><th>Строк</th><th class="num">Сумма</th></tr></thead>
+  {% for s, v in by_supplier.items %}<tr><td>{{ s.name }}</td><td>{{ v.count }}</td><td class="num">{{ v.amount|money }}</td></tr>{% endfor %}
+  <tr class="fw-bold"><td>Итого</td><td></td><td class="num">{{ proc.decision_total|money }} {% cur %}</td></tr>
+</table>
+{% with pend=decision_lines %}
+<ul class="list-group list-group-flush">
+{% for d in decision_lines %}{% if d.analog_state != 'na' %}
+  <li class="list-group-item small"><b>{{ d.procurement_line.item.code }}</b> аналог «{{ d.quote_line.analog_description }}»: {% badge d.analog_state d.get_analog_state_display %}</li>
+{% endif %}{% endfor %}
+</ul>
+{% endwith %}
+{% if manage and can_edit_decision %}
+<div class="card-body">
+  <form method="post" action="{% url 'procurement_action' proc.pk 'submit_decision' %}">{% csrf_token %}
+    <button class="btn btn-success"><i class="bi bi-send-check"></i> Отправить решение на утверждение</button>
+    <div class="small-muted mt-1">Согласующие определяются порогом суммы (настраивается в справочнике «Правила согласования решений»). Ниже порога — утверждается сразу.</div>
+  </form>
+</div>
+{% endif %}
+</div>
+</div>
+<div class="col-lg-5">
+<div class="card"><div class="card-header">Согласование решения</div>
+<ul class="list-group list-group-flush">
+  {% for a in approvals %}
+  <li class="list-group-item d-flex"><span class="flex-grow-1">{{ a.role }}{% if a.user %} — {{ a.user.get_full_name }}{% endif %}{% if a.comment %}<div class="small-muted">{{ a.comment }}</div>{% endif %}</span>{% badge a.state a.get_state_display %}</li>
+  {% empty %}<li class="list-group-item muted">{% if proc.decision_state == 'approved' %}Утверждено без дополнительного согласования (ниже порогов){% else %}Не отправлялось{% endif %}</li>{% endfor %}
+</ul></div>
+</div>
+</div>
+{% endif %}
+
+<script>
+document.querySelectorAll('.price-pick').forEach(el => el.addEventListener('click', () => {
+  const inputs = document.querySelectorAll('.line-' + el.dataset.line);
+  if (!inputs.length) return;
+  inputs.forEach(i => i.value = '');
+  el.parentElement.querySelector('input').value = el.dataset.qty.replace(/\.?0+$/, '');
+}));
+</script>

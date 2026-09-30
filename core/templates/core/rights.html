@@ -1,0 +1,14 @@
+{% extends "core/base.html" %}
+{% block title %}Роли и права{% endblock %}
+{% block content %}
+<h1 class="page-title mb-1">Роли и права</h1>
+<p class="muted">Раздел 10 ТЗ не заполнен — ниже предложение для согласования с клиентом. Роли назначаются пользователям в админке (группы); у одного пользователя может быть несколько ролей.</p>
+<div class="card mb-3"><div class="table-responsive"><table class="table table-sm table-bordered mb-0">
+  <thead><tr><th>Действие</th>{% for r in roles %}<th class="text-center">{{ r }}</th>{% endfor %}</tr></thead>
+  {% for label, flags in matrix %}<tr><td>{{ label }}</td>{% for f in flags %}<td class="text-center">{% if f %}<i class="bi bi-check-lg text-success"></i>{% endif %}</td>{% endfor %}</tr>{% endfor %}
+</table></div></div>
+<div class="card"><div class="card-header">Ограничения по данным</div>
+<ul class="list-group list-group-flush">
+  {% for r, t in extra %}<li class="list-group-item"><b>{{ r }}</b> — {{ t }}</li>{% endfor %}
+</ul></div>
+{% endblock %}

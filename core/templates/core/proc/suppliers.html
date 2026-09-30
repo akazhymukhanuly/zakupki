@@ -1,0 +1,62 @@
+{% load core_tags %}
+<div class="row g-3">
+<div class="col-lg-7">
+  <div class="card mb-3">
+    <div class="card-header d-flex align-items-center"><span class="flex-grow-1">Запросы КП</span>
+      {% if manage and rfqs %}
+      <form method="post" action="{% url 'procurement_action' proc.pk 'send' %}">{% csrf_token %}
+        <button class="btn btn-sm btn-primary"><i class="bi bi-send"></i> Отметить все как отправленные</button></form>
+      {% endif %}
+    </div>
+    <table class="table table-sm mb-0">
+      <thead><tr><th>Поставщик</th><th>Отправлен</th><th>КП</th><th class="text-end">Действия</th></tr></thead>
+      {% for r in rfqs %}
+      <tr>
+        <td>{{ r.supplier.name }}<div class="small-muted">{{ r.supplier.email }} {{ r.supplier.phone }}</div>
+          {% if r.needs_correction %}<span class="badge st-warning">состав лота изменился — отправьте запрос повторно</span>{% endif %}</td>
+        <td class="small">{{ r.sent_at|date:"d.m.Y H:i"|default:"—" }}</td>
+        <td>{% if r.has_quote %}<span class="badge st-success">получено</span>{% else %}<span class="badge st-secondary">нет</span>{% endif %}</td>
+        <td class="text-end text-nowrap">
+          <a class="btn btn-sm btn-outline-secondary" href="{% url 'rfq_print' proc.pk r.pk %}" target="_blank" title="Печатная форма / письмо"><i class="bi bi-printer"></i></a>
+          <a class="btn btn-sm btn-outline-secondary" href="mailto:{{ r.supplier.email }}?subject={{ 'Запрос КП, закупка №'|urlencode }}{{ proc.number }}&body={{ 'Просим предоставить коммерческое предложение. Спецификация и форма для заполнения по ссылке: '|urlencode }}{{ request.scheme }}://{{ request.get_host }}{% url 'portal_quote' r.token %}" title="Письмо поставщику"><i class="bi bi-envelope"></i></a>
+          <button class="btn btn-sm btn-outline-secondary" type="button" onclick="navigator.clipboard.writeText('{{ request.scheme }}://{{ request.get_host }}{% url 'portal_quote' r.token %}');this.innerHTML='<i class=\'bi bi-check2\'></i>'" title="Скопировать ссылку для поставщика"><i class="bi bi-link-45deg"></i></button>
+          {% if manage %}
+          <a class="btn btn-sm btn-primary" href="{% url 'quote_entry' proc.pk r.pk %}">Ввести КП</a>
+          {% if not r.has_quote %}
+          <form method="post" action="{% url 'procurement_action' proc.pk 'remove_rfq' %}" class="d-inline">{% csrf_token %}<input type="hidden" name="rfq" value="{{ r.pk }}"><button class="btn btn-sm btn-link text-danger p-0 ms-1" title="Убрать"><i class="bi bi-x-lg"></i></button></form>
+          {% endif %}{% endif %}
+        </td>
+      </tr>
+      {% empty %}<tr><td colspan="4" class="muted text-center py-3">Поставщики ещё не выбраны</td></tr>{% endfor %}
+    </table>
+  </div>
+
+  <div class="card">
+    <div class="card-header">Спецификация запроса (сводные строки, п. 6.1)</div>
+    <table class="table table-sm mb-0">
+      <thead><tr><th>#</th><th>Наименование</th><th class="num">Кол-во</th><th>Срок</th><th>Позиции</th></tr></thead>
+      {% for row in consolidated %}
+      <tr><td>{{ forloop.counter }}</td><td>{{ row.description }}{% if row.consolidated %} <span class="badge st-warning">сводная</span>{% endif %}</td>
+        <td class="num">{{ row.quantity|qty }} {{ row.unit }}</td><td>{{ row.required_date|date:"d.m.Y" }}</td><td class="small">{{ row.codes }}</td></tr>
+      {% endfor %}
+    </table>
+  </div>
+</div>
+<div class="col-lg-5">
+  {% if manage %}
+  <div class="card">
+    <div class="card-header d-flex"><span class="flex-grow-1">Добавить поставщиков</span>
+      <a class="small" href="?tab=suppliers{% if not request.GET.all_suppliers %}&all_suppliers=1{% endif %}">{% if request.GET.all_suppliers %}только по категориям лота{% else %}показать всех{% endif %}</a></div>
+    <form method="post" action="{% url 'procurement_action' proc.pk 'add_suppliers' %}">{% csrf_token %}
+      <div class="list-group list-group-flush" style="max-height:420px;overflow:auto">
+      {% for s in candidates %}
+        <label class="list-group-item d-flex gap-2"><input type="checkbox" class="form-check-input" name="suppliers" value="{{ s.pk }}">
+          <span>{{ s.name }}<div class="small-muted">{% for c in s.categories.all %}{{ c }}{% if not forloop.last %}, {% endif %}{% endfor %}</div></span></label>
+      {% empty %}<div class="list-group-item muted">Нет подходящих поставщиков. <a href="{% url 'supplier_create' %}">Добавить в справочник</a></div>{% endfor %}
+      </div>
+      <div class="card-body"><button class="btn btn-sm btn-primary">Добавить в запрос</button></div>
+    </form>
+  </div>
+  {% endif %}
+</div>
+</div>

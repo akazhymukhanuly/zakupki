@@ -1,0 +1,65 @@
+{% extends "core/base.html" %}{% load core_tags %}
+{% block title %}Входящие{% endblock %}
+{% block content %}
+<h1 class="page-title mb-3">Входящие</h1>
+{% if not memos and not decisions and not analogs and not withdrawals %}
+<div class="card card-body text-center muted py-5"><i class="bi bi-check2-circle fs-1"></i>Нет задач, требующих вашего действия</div>
+{% endif %}
+
+{% if memos %}
+<div class="card mb-3"><div class="card-header">СЗ на согласовании ({{ memos|length }})</div>
+<table class="table table-hover mb-0">
+  <thead><tr><th>№</th><th>Подразделение</th><th>Инициатор</th><th>Обоснование</th><th>Позиций</th><th>Срок</th><th>Отправлена</th></tr></thead>
+  {% for m in memos %}
+  <tr onclick="location='{{ m.get_absolute_url }}'" style="cursor:pointer">
+    <td><a href="{{ m.get_absolute_url }}">{{ m }}</a></td><td>{{ m.department }}</td><td>{{ m.initiator.get_full_name }}</td>
+    <td>{{ m.justification|truncatechars:80 }}</td><td>{{ m.items.all|length }}</td><td>{{ m.required_date|date:"d.m.Y" }}</td><td>{{ m.submitted_at|date:"d.m.Y H:i" }}</td>
+  </tr>{% endfor %}
+</table></div>
+{% endif %}
+
+{% if decisions %}
+<div class="card mb-3"><div class="card-header">Решения по закупкам на согласовании ({{ decisions|length }})</div>
+<table class="table table-hover mb-0">
+  <thead><tr><th>Закупка</th><th>Закупщик</th><th>Роль</th><th class="num">Сумма решения</th><th></th></tr></thead>
+  {% for a in decisions %}
+  <tr><td><a href="{% url 'procurement_detail' a.procurement.pk %}?tab=decision">№{{ a.procurement.number }} {{ a.procurement.title }}</a></td>
+    <td>{{ a.procurement.buyer.get_full_name }}</td><td>{{ a.role }}</td><td class="num">{{ a.procurement.decision_total|money }} {% cur %}</td>
+    <td class="text-end"><a class="btn btn-sm btn-primary" href="{% url 'procurement_detail' a.procurement.pk %}?tab=decision">Рассмотреть</a></td></tr>
+  {% endfor %}
+</table></div>
+{% endif %}
+
+{% if analogs %}
+<div class="card mb-3 border-warning"><div class="card-header">Подтвердите замену на аналог ({{ analogs|length }})</div>
+<ul class="list-group list-group-flush">
+{% for d in analogs %}
+  <li class="list-group-item d-flex gap-3 align-items-center flex-wrap">
+    <div class="flex-grow-1"><a href="{{ d.procurement_line.item.memo.get_absolute_url }}">{{ d.procurement_line.item.code }}</a> «{{ d.procurement_line.item.description }}» → <b>«{{ d.quote_line.analog_description }}»</b>
+      <div class="small-muted">{{ d.supplier }} · {{ d.price|money }} {% cur %} за ед.</div></div>
+    <form method="post" action="{% url 'analog_confirm' d.pk %}" class="d-flex gap-2">{% csrf_token %}
+      <button name="accept" value="1" class="btn btn-success btn-sm">Согласен</button>
+      <button name="accept" value="0" class="btn btn-outline-danger btn-sm">Не согласен</button>
+    </form>
+  </li>
+{% endfor %}
+</ul></div>
+{% endif %}
+
+{% if withdrawals %}
+<div class="card mb-3"><div class="card-header">Запросы инициаторов на отзыв позиций ({{ withdrawals|length }})</div>
+<ul class="list-group list-group-flush">
+{% for w in withdrawals %}
+  <li class="list-group-item d-flex gap-3 align-items-center flex-wrap">
+    <div class="flex-grow-1"><b>{{ w.item.code }}</b> «{{ w.item.description }}» из <a href="{{ w.procurement.get_absolute_url }}">закупки №{{ w.procurement.number }}</a>
+      <div class="small-muted">{{ w.requested_by.get_full_name }}: {{ w.reason }}</div></div>
+    <form method="post" action="{% url 'procurement_action' w.procurement.pk 'withdrawal' %}" class="d-flex gap-2">{% csrf_token %}
+      <input type="hidden" name="req" value="{{ w.pk }}">
+      <button name="approve" value="1" class="btn btn-sm btn-danger">Подтвердить отзыв</button>
+      <button name="approve" value="0" class="btn btn-sm btn-outline-secondary">Отклонить</button>
+    </form>
+  </li>
+{% endfor %}
+</ul></div>
+{% endif %}
+{% endblock %}

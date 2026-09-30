@@ -1,0 +1,28 @@
+{% extends "core/base.html" %}{% load core_tags %}
+{% block title %}Закупки{% endblock %}
+{% block content %}
+<div class="d-flex align-items-center mb-3">
+  <h1 class="page-title flex-grow-1">Закупки</h1>
+  {% if perm.pool_view %}<a class="btn btn-primary" href="{% url 'pool' %}"><i class="bi bi-collection"></i> Сформировать из пула</a>{% endif %}
+</div>
+<form class="card card-body mb-3 py-2"><div class="row g-2 align-items-end">
+  <div class="col-md-3"><select name="status" class="form-select form-select-sm"><option value="">Активные</option>
+    {% for code, label in statuses %}<option value="{{ code }}" {% if f.status == code %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+  <div class="col-md-2"><div class="form-check"><input class="form-check-input" type="checkbox" name="all" value="1" id="all" {% if f.all %}checked{% endif %}><label for="all" class="form-check-label">Включая закрытые</label></div></div>
+  <div class="col-md-2"><div class="form-check"><input class="form-check-input" type="checkbox" name="mine" value="1" id="mine" {% if f.mine %}checked{% endif %}><label for="mine" class="form-check-label">Мои</label></div></div>
+  <div class="col-md-2"><button class="btn btn-sm btn-outline-primary w-100">Показать</button></div>
+</div></form>
+<div class="card"><table class="table table-hover mb-0">
+  <thead><tr><th>№</th><th>Наименование</th><th>Способ</th><th>Закупщик</th><th>Позиций</th><th>Поставщиков</th><th>Срок КП</th><th>Статус</th><th>Решение</th></tr></thead>
+  {% for p in procurements %}
+  <tr onclick="location='{{ p.get_absolute_url }}'" style="cursor:pointer">
+    <td class="fw-semibold"><a href="{{ p.get_absolute_url }}">{{ p.number }}</a></td>
+    <td>{{ p.title }}</td><td>{{ p.get_method_display }}</td><td>{{ p.buyer.get_full_name }}</td>
+    <td>{{ p.active_lines.count }}</td><td>{{ p.rfqs.count }}</td>
+    <td class="{% if p.is_overdue_kp %}text-danger fw-semibold{% endif %}">{{ p.kp_deadline|date:"d.m.Y"|default:"—" }}</td>
+    <td>{% badge p.status p.get_status_display %}</td>
+    <td>{% if p.decision_state != 'none' %}{% badge p.decision_state p.get_decision_state_display %}{% endif %}</td>
+  </tr>
+  {% empty %}<tr><td colspan="9" class="text-center muted py-4">Закупок нет</td></tr>{% endfor %}
+</table></div>
+{% endblock %}

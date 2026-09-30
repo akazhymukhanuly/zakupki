@@ -1,0 +1,32 @@
+{% extends "core/base.html" %}{% load core_tags %}
+{% block title %}Договоры{% endblock %}
+{% block content %}
+<div class="d-flex align-items-center mb-3">
+  <h1 class="page-title flex-grow-1">Договоры</h1>
+  {% if perm.contract_manage %}<a class="btn btn-outline-primary" href="{% url 'contract_create' %}"><i class="bi bi-plus"></i> Рамочный договор</a>{% endif %}
+</div>
+<form class="card card-body mb-3 py-2"><div class="row g-2 align-items-end">
+  <div class="col-md-3"><input name="supplier" value="{{ f.supplier }}" class="form-control form-control-sm" placeholder="Поставщик"></div>
+  <div class="col-md-3"><select name="status" class="form-select form-select-sm"><option value="">Любой статус</option>
+    {% for c, l in statuses %}<option value="{{ c }}" {% if f.status == c %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></div>
+  <div class="col-md-3"><select name="kind" class="form-select form-select-sm"><option value="">Любой вид</option>
+    {% for c, l in kinds %}<option value="{{ c }}" {% if f.kind == c %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></div>
+  <div class="col-md-2"><button class="btn btn-sm btn-outline-primary w-100">Найти</button></div>
+</div></form>
+<div class="card"><table class="table table-hover mb-0">
+  <thead><tr><th>Номер</th><th>Дата</th><th>Вид</th><th>Поставщик</th><th>Закупка</th><th>СЗ</th><th class="num">Сумма</th><th class="num">Оплачено</th><th>Поставка</th><th>Статус</th><th>1С</th></tr></thead>
+  {% for c in contracts %}
+  <tr onclick="location='{{ c.get_absolute_url }}'" style="cursor:pointer">
+    <td class="fw-semibold"><a href="{{ c.get_absolute_url }}">{{ c.number }}</a></td><td>{{ c.date|date:"d.m.Y" }}</td>
+    <td class="small">{{ c.get_kind_display }}{% if c.parent %}<div class="small-muted">к {{ c.parent.number }}</div>{% endif %}</td>
+    <td>{{ c.supplier.name }}</td><td>{% if c.procurement %}№{{ c.procurement.number }}{% else %}—{% endif %}</td>
+    <td class="small">{% for m in c.memos %}№{{ m.number }}{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}</td>
+    <td class="num">{% if c.kind == 'framework' %}—{% else %}{{ c.amount|money }}{% endif %}</td>
+    <td class="num">{{ c.paid_total|money }}</td>
+    <td class="progress-wrap">{% if c.kind != 'framework' %}{% with p=c.delivered_percent %}<div class="progress"><div class="progress-bar {{ p|pct_class }}" style="width:{{ p }}%"></div></div><div class="small-muted">{{ p }}%</div>{% endwith %}{% endif %}</td>
+    <td>{% badge c.status c.get_status_display %}</td>
+    <td>{% if c.exported_1c_at %}<i class="bi bi-check2 text-success" title="Выгружен {{ c.exported_1c_at|date:'d.m.Y H:i' }}"></i>{% endif %}</td>
+  </tr>
+  {% empty %}<tr><td colspan="11" class="text-center muted py-4">Договоров нет</td></tr>{% endfor %}
+</table></div>
+{% endblock %}

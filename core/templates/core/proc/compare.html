@@ -1,0 +1,44 @@
+{% load core_tags %}
+<div class="d-flex align-items-center mb-2 gap-2">
+  <div class="flex-grow-1 small-muted">Строки — позиции, колонки — поставщики. Зелёным — минимальная цена в строке.</div>
+  <a class="btn btn-sm btn-outline-success" href="{% url 'comparison_export' proc.pk %}"><i class="bi bi-file-earmark-excel"></i> Экспорт в Excel</a>
+  {% if manage and can_edit_decision %}<a class="btn btn-sm btn-primary" href="?tab=decision">К решению →</a>{% endif %}
+</div>
+{% if not cmp.quotes %}
+<div class="card card-body text-center muted py-5">Нет КП для сравнения</div>
+{% else %}
+<div class="card"><div class="table-responsive">
+<table class="table table-sm table-bordered mb-0 cmp-table">
+  <thead>
+    <tr><th class="pos sticky-col">Позиция</th><th class="num">Кол-во</th>
+      {% for q in cmp.quotes %}<th class="text-center">{{ q.supplier.name }}</th>{% endfor %}</tr>
+  </thead>
+  <tbody>
+  {% for row in cmp.rows %}
+  <tr>
+    <td class="pos sticky-col"><a href="{{ row.line.item.memo.get_absolute_url }}">{{ row.line.item.code }}</a> {{ row.line.item.description }}</td>
+    <td class="num">{{ row.line.quantity|qty }} {{ row.line.item.unit }}</td>
+    {% for c in row.cells %}
+    <td class="num {% if c.is_min %}cell-best{% endif %}">
+      {% if not c.ql %}<span class="muted">—</span>
+      {% elif c.ql.not_offered %}<span class="muted small">не предлагает</span>
+      {% else %}
+        {{ c.ql.price|money }}
+        <div class="small-muted">{% if c.ql.lead_time_days %}{{ c.ql.lead_time_days }} дн.{% endif %}{% if c.ql.offered_qty %} · только {{ c.ql.offered_qty|qty }}{% endif %}</div>
+        {% if c.ql.is_analog %}<div class="cell-analog">аналог: {{ c.ql.analog_description }}</div>{% endif %}
+        {% if c.ql.comment %}<div class="small-muted">{{ c.ql.comment }}</div>{% endif %}
+      {% endif %}
+    </td>
+    {% endfor %}
+  </tr>
+  {% endfor %}
+  </tbody>
+  <tfoot class="fw-semibold">
+    <tr><td class="sticky-col">Итого по поставщику</td><td></td>
+      {% for t in cmp.totals %}<td class="num">{{ t.total|money }}<div class="small-muted fw-normal">{{ t.covered }}/{{ cmp.line_count }} поз.</div></td>{% endfor %}</tr>
+    <tr class="table-success"><td class="sticky-col">Если брать лучшее по каждой строке</td><td></td>
+      <td colspan="{{ cmp.quotes|length }}" class="num">{{ cmp.best_total|money }} {% cur %}</td></tr>
+  </tfoot>
+</table>
+</div></div>
+{% endif %}

@@ -1,0 +1,45 @@
+{% load core_tags %}
+<div class="row g-3">
+<div class="col-lg-9">
+<div class="card">
+  <div class="card-header d-flex"><span class="flex-grow-1">Позиции лота (из каких СЗ)</span>
+    {% if manage and can_edit_lines %}<a href="{% url 'pool' %}" class="btn btn-sm btn-outline-primary">+ Добавить из пула</a>{% endif %}</div>
+  <div class="table-responsive">
+  <table class="table table-sm mb-0">
+    <thead><tr><th>Позиция</th><th>Наименование</th><th class="num">Кол-во</th><th>Срок</th><th>Подразделение / инициатор</th><th>Статус позиции</th><th>В лоте</th><th></th></tr></thead>
+    <tbody>
+    {% for l in lines %}
+    <tr class="{% if l.item.urgent %}row-urgent{% endif %} {% if l.state == 'released' or l.state == 'removed' %}row-muted{% endif %}">
+      <td class="text-nowrap"><a href="{{ l.item.memo.get_absolute_url }}">{{ l.item.code }}</a></td>
+      <td>{{ l.item.description }}{% if l.item.urgent %} <span class="badge bg-danger">срочно</span>{% endif %}</td>
+      <td class="num">{{ l.quantity|qty }} {{ l.item.unit }}</td>
+      <td class="text-nowrap">{{ l.item.required_date|date:"d.m.Y" }}</td>
+      <td class="small">{{ l.item.memo.department }} / {{ l.item.memo.initiator.get_full_name }}</td>
+      <td>{% badge l.item.status l.item.get_status_display %}</td>
+      <td class="small">{{ l.get_state_display }}</td>
+      <td class="text-end">
+        {% if manage and l.state == 'active' and proc.decision_state != 'on_approval' and proc.decision_state != 'approved' %}
+        <form method="post" action="{% url 'procurement_action' proc.pk 'release' %}" data-confirm="Вернуть позицию в пул?">{% csrf_token %}
+          <input type="hidden" name="line" value="{{ l.pk }}"><button class="btn btn-sm btn-link p-0" title="Вернуть в пул"><i class="bi bi-box-arrow-left"></i> в пул</button></form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+</div>
+<div class="col-lg-3">
+  <div class="card"><div class="card-header">Параметры</div><div class="card-body">
+  {% if manage and proc.is_open %}
+    <form method="post" action="{% url 'procurement_action' proc.pk 'edit' %}">{% csrf_token %}
+      {% for field in edit_form %}<div class="mb-2"><label class="form-label small mb-0">{{ field.label }}</label>{{ field }}</div>{% endfor %}
+      <button class="btn btn-sm btn-primary">Сохранить</button>
+    </form>
+  {% else %}
+    <dl class="mb-0"><dt>Способ</dt><dd>{{ proc.get_method_display }}</dd><dt>Ответственный</dt><dd>{{ proc.buyer.get_full_name }}</dd><dt>Срок КП</dt><dd>{{ proc.kp_deadline|date:"d.m.Y"|default:"—" }}</dd></dl>
+  {% endif %}
+  </div></div>
+</div>
+</div>

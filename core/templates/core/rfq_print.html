@@ -1,0 +1,28 @@
+{% load core_tags %}<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><title>Запрос КП — закупка №{{ proc.number }} — {{ rfq.supplier.name }}</title>
+<style>
+  body { font-family: "Times New Roman", serif; font-size: 13pt; max-width: 800px; margin: 30px auto; color: #000; }
+  table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+  th, td { border: 1px solid #000; padding: 4px 6px; font-size: 11pt; }
+  th { background: #eee; }
+  .num { text-align: right; }
+  .right { text-align: right; }
+  .noprint { margin-bottom: 20px; font-family: sans-serif; font-size: 11pt; }
+  @media print { .noprint { display: none; } }
+</style></head>
+<body>
+<div class="noprint"><button onclick="print()">Печать / PDF</button> <a href="{% url 'procurement_detail' proc.pk %}?tab=suppliers">← к закупке</a></div>
+<p class="right">{{ rfq.supplier.name }}<br>{% if rfq.supplier.contact %}{{ rfq.supplier.contact }}<br>{% endif %}{{ rfq.supplier.email }}</p>
+<h3 style="text-align:center">ЗАПРОС КОММЕРЧЕСКОГО ПРЕДЛОЖЕНИЯ<br>№ {{ proc.number }}-{{ rfq.pk }} от {% now "d.m.Y" %}</h3>
+<p>Просим предоставить коммерческое предложение на поставку следующих товаров (работ, услуг){% if proc.kp_deadline %} в срок до <b>{{ proc.kp_deadline|date:"d.m.Y" }}</b>{% endif %}:</p>
+<table>
+  <tr><th>№</th><th>Наименование</th><th>Ед.</th><th>Кол-во</th><th>Требуемый срок поставки</th><th>Цена за ед.</th><th>Срок поставки</th></tr>
+  {% for r in rows %}
+  <tr><td>{{ forloop.counter }}</td><td>{{ r.description }}</td><td>{{ r.unit }}</td><td class="num">{{ r.quantity|qty }}</td><td>{{ r.required_date|date:"d.m.Y" }}</td><td></td><td></td></tr>
+  {% endfor %}
+</table>
+<p>В предложении просим указать: цену за единицу с учётом НДС, срок поставки, условия оплаты, срок действия предложения.
+Если какую-то позицию вы не поставляете — отметьте «не предлагаем»; если предлагаете аналог — укажите его точное описание.</p>
+<p>Заполнить предложение онлайн можно по ссылке:<br><b>{{ portal_url }}</b></p>
+<br><p>Ответственный: {{ proc.buyer.get_full_name }}{% if proc.buyer.email %}, {{ proc.buyer.email }}{% endif %}</p>
+</body></html>

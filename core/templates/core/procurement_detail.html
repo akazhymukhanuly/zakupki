@@ -1,0 +1,63 @@
+{% extends "core/base.html" %}{% load core_tags %}
+{% block title %}Закупка №{{ proc.number }}{% endblock %}
+{% block breadcrumbs %}<a href="{% url 'procurement_list' %}">Закупки</a> / №{{ proc.number }}{% endblock %}
+{% block content %}
+<div class="d-flex align-items-start gap-3 mb-2 flex-wrap">
+  <div class="flex-grow-1">
+    <h1 class="page-title">Закупка №{{ proc.number }} · {{ proc.title }}</h1>
+    <div class="muted">{{ proc.get_method_display }} · закупщик {{ proc.buyer.get_full_name }} · срок КП {{ proc.kp_deadline|date:"d.m.Y"|default:"не задан" }}</div>
+  </div>
+  {% if manage and proc.is_open %}
+  <div class="d-flex gap-2">
+    {% if proc.status == 'contracts' %}
+    <form method="post" action="{% url 'procurement_action' proc.pk 'close' %}">{% csrf_token %}<button class="btn btn-sm btn-success">Закрыть закупку</button></form>
+    {% endif %}
+    {% if proc.status != 'contracts' %}
+    <form method="post" action="{% url 'procurement_action' proc.pk 'cancel' %}" data-confirm="Отменить закупку? Все позиции вернутся в пул.">{% csrf_token %}<button class="btn btn-sm btn-outline-danger">Отменить закупку</button></form>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+
+<div class="stepper mb-3">
+  {% for label, state in steps %}
+  <span class="step {% if state == 'cancelled' %}current bg-danger{% else %}{{ state }}{% endif %}">{% if state == 'done' %}✓ {% endif %}{{ label }}</span>
+  {% endfor %}
+  {% if proc.decision_state != 'none' %}<span class="ms-2">{% badge proc.decision_state proc.get_decision_state_display %}</span>{% endif %}
+</div>
+
+{% if withdrawals and manage %}
+<div class="alert alert-warning">
+  {% for w in withdrawals %}
+  <form method="post" action="{% url 'procurement_action' proc.pk 'withdrawal' %}" class="d-flex gap-2 align-items-center mb-1">{% csrf_token %}
+    <input type="hidden" name="req" value="{{ w.pk }}"><input type="hidden" name="tab" value="{{ tab }}">
+    <div class="flex-grow-1"><b>Запрос на отзыв:</b> {{ w.item.code }} «{{ w.item.description }}» — {{ w.requested_by.get_full_name }}: {{ w.reason }}</div>
+    <button name="approve" value="1" class="btn btn-sm btn-danger">Подтвердить</button>
+    <button name="approve" value="0" class="btn btn-sm btn-outline-secondary">Отклонить</button>
+  </form>
+  {% endfor %}
+</div>
+{% endif %}
+
+<ul class="nav nav-tabs mb-3">
+  {% for code, label in tabs %}
+  <li class="nav-item"><a class="nav-link {% if tab == code %}active{% endif %}" href="?tab={{ code }}">{{ label }}
+    {% if code == 'items' %}<span class="badge st-secondary">{{ active_lines|length }}</span>{% endif %}
+    {% if code == 'suppliers' %}<span class="badge st-secondary">{{ rfqs|length }}</span>{% endif %}
+  </a></li>
+  {% endfor %}
+</ul>
+
+{% if tab == 'items' %}{% include "core/proc/items.html" %}
+{% elif tab == 'suppliers' %}{% include "core/proc/suppliers.html" %}
+{% elif tab == 'quotes' %}{% include "core/proc/quotes.html" %}
+{% elif tab == 'compare' %}{% include "core/proc/compare.html" %}
+{% elif tab == 'decision' %}{% include "core/proc/decision.html" %}
+{% elif tab == 'contracts' %}{% include "core/proc/contracts.html" %}
+{% elif tab == 'history' %}
+<div class="card"><div class="card-body"><ul class="list-unstyled history mb-0">
+  {% for h in history %}<li><span class="small-muted">{{ h.created_at|date:"d.m.Y H:i" }} · {{ h.user.get_full_name|default:h.user|default:"система" }}</span><br>{{ h.text }}</li>
+  {% empty %}<li class="muted">Пусто</li>{% endfor %}
+</ul></div></div>
+{% endif %}
+{% endblock %}

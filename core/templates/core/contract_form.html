@@ -1,0 +1,12 @@
+{% extends "core/base.html" %}
+{% block title %}Рамочный договор{% endblock %}
+{% block content %}
+<h1 class="page-title mb-3">Новый рамочный договор</h1>
+<p class="muted" style="max-width:760px">Обычные договоры создаются из закупки после утверждения решения. Здесь заводится рамочный договор с поставщиком — при следующих закупках система предложит оформить к нему спецификацию вместо нового договора.</p>
+<div class="card" style="max-width:760px"><div class="card-body">
+<form method="post">{% csrf_token %}
+  {% for field in form %}<div class="mb-3"><label class="form-label">{{ field.label }}</label>{{ field }}{% for e in field.errors %}<div class="text-danger small">{{ e }}</div>{% endfor %}</div>{% endfor %}
+  <button class="btn btn-primary">Создать</button> <a class="btn btn-link" href="{% url 'contract_list' %}">Отмена</a>
+</form>
+</div></div>
+{% endblock %}

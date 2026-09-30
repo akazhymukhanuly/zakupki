@@ -1,0 +1,37 @@
+{% load core_tags %}
+<div class="table-responsive">
+<table class="table table-sm mb-0 quote-table">
+  <thead><tr>
+    <th>#</th><th>Наименование</th><th class="num">Кол-во</th><th>Цена за ед., {% cur %}</th><th>Срок, дн.</th>
+    <th title="Если можете поставить только часть">Можем поставить</th><th>Не предлагаем</th><th>Аналог (описание)</th><th>Комментарий</th>
+  </tr></thead>
+  <tbody>
+  {% for g in groups %}
+  <tr>
+    <td>{{ forloop.counter }}</td>
+    <td>{{ g.description }}
+      {% if g.consolidated %}<div class="small-muted">сводная строка{% if not portal %}: {{ g.codes }}{% endif %} — цена применяется ко всем</div>
+      {% elif not portal %}<div class="small-muted">{{ g.codes }}</div>{% endif %}
+    </td>
+    <td class="num text-nowrap">{{ g.quantity|qty }} {{ g.unit }}</td>
+    <td><input class="form-control form-control-sm price-input kb" name="price_{{ g.id }}" value="{% if g.ql and g.ql.price is not None %}{{ g.ql.price }}{% endif %}" inputmode="decimal"></td>
+    <td><input class="form-control form-control-sm kb" style="width:70px" name="lead_{{ g.id }}" value="{{ g.ql.lead_time_days|default_if_none:'' }}" inputmode="numeric"></td>
+    <td><input class="form-control form-control-sm qty-input kb" name="offered_{{ g.id }}" value="{% if g.ql.offered_qty is not None %}{{ g.ql.offered_qty|qty }}{% endif %}" placeholder="всё"></td>
+    <td class="text-center"><input type="checkbox" class="form-check-input" name="no_{{ g.id }}" {% if g.ql.not_offered %}checked{% endif %}></td>
+    <td><input class="form-control form-control-sm kb" name="analog_{{ g.id }}" value="{{ g.ql.analog_description|default:'' }}" placeholder="если предлагаете аналог"></td>
+    <td><input class="form-control form-control-sm kb" name="comment_{{ g.id }}" value="{{ g.ql.comment|default:'' }}"></td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<script>
+// Быстрый ввод с клавиатуры: Enter / стрелки вверх-вниз — переход по колонке.
+document.querySelectorAll('.quote-table .kb').forEach(inp => inp.addEventListener('keydown', e => {
+  if (!['Enter', 'ArrowDown', 'ArrowUp'].includes(e.key)) return;
+  const td = inp.closest('td'), tr = td.parentElement, idx = [...tr.children].indexOf(td);
+  const next = e.key === 'ArrowUp' ? tr.previousElementSibling : tr.nextElementSibling;
+  if (next) { e.preventDefault(); const t = next.children[idx].querySelector('input'); if (t) { t.focus(); t.select(); } }
+  else if (e.key === 'Enter') e.preventDefault();
+}));
+</script>

@@ -1,0 +1,52 @@
+{% load core_tags %}
+{% if proposals and manage %}
+<form method="post" action="{% url 'procurement_action' proc.pk 'contracts' %}">{% csrf_token %}
+<div class="card mb-3 border-primary">
+  <div class="card-header">Предложение по договорам — по одному на каждого выбранного поставщика</div>
+  <div class="card-body">
+  {% for g in proposals %}
+  <div class="border rounded p-3 mb-3">
+    <div class="d-flex align-items-center mb-2 gap-3 flex-wrap">
+      <h6 class="mb-0 flex-grow-1">{{ g.supplier.name }} <span class="muted fw-normal">· {{ g.lines|length }} строк · {{ g.amount|money }} {% cur %}</span></h6>
+      {% if g.framework %}
+      <div class="btn-group btn-group-sm" role="group">
+        <input type="radio" class="btn-check" name="mode_{{ g.supplier.pk }}" id="sp{{ g.supplier.pk }}" value="spec" checked>
+        <label class="btn btn-outline-primary" for="sp{{ g.supplier.pk }}">Спецификация к рамочному {{ g.framework.number }}</label>
+        <input type="radio" class="btn-check" name="mode_{{ g.supplier.pk }}" id="nw{{ g.supplier.pk }}" value="new">
+        <label class="btn btn-outline-primary" for="nw{{ g.supplier.pk }}">Новый договор</label>
+      </div>
+      {% else %}<input type="hidden" name="mode_{{ g.supplier.pk }}" value="new">{% endif %}
+      <input name="number_{{ g.supplier.pk }}" class="form-control form-control-sm" style="width:180px" placeholder="№ (авто)">
+    </div>
+    {% if g.framework %}<div class="alert alert-info py-1 small">С поставщиком есть действующий рамочный договор {{ g.framework.number }} от {{ g.framework.date|date:"d.m.Y" }} — предлагаем оформить спецификацию к нему.</div>{% endif %}
+    <table class="table table-sm mb-0">
+      <thead><tr><th>Позиция</th><th>СЗ</th><th>Инициатор</th><th>Наименование</th><th class="num">Кол-во</th><th class="num">Цена</th><th class="num">Сумма</th></tr></thead>
+      {% for d in g.lines %}
+      <tr><td>{{ d.procurement_line.item.code }}</td><td>№{{ d.procurement_line.item.memo.number }}</td><td class="small">{{ d.procurement_line.item.memo.initiator.get_full_name }}</td>
+        <td>{% if d.quote_line.is_analog %}{{ d.quote_line.analog_description }} <span class="cell-analog">(аналог)</span>{% else %}{{ d.procurement_line.item.description }}{% endif %}</td>
+        <td class="num">{{ d.quantity|qty }}</td><td class="num">{{ d.price|money }}</td><td class="num">{{ d.amount|money }}</td></tr>
+      {% endfor %}
+    </table>
+  </div>
+  {% endfor %}
+  <div class="d-flex gap-3 align-items-center">
+    <button class="btn btn-primary"><i class="bi bi-file-earmark-plus"></i> Создать договоры</button>
+    <div class="form-check"><input class="form-check-input" type="checkbox" name="allow_over" value="1" id="ao2"><label for="ao2" class="form-check-label small">Подтверждаю превышение количества позиции</label></div>
+  </div>
+  </div>
+</div>
+</form>
+{% elif proc.decision_state != 'approved' %}
+<div class="alert alert-secondary">Договоры предлагаются после утверждения решения.</div>
+{% endif %}
+
+<div class="card">
+  <div class="card-header">Договоры по закупке</div>
+  <table class="table table-sm mb-0">
+    <thead><tr><th>Номер</th><th>Вид</th><th>Поставщик</th><th>Строк</th><th class="num">Сумма</th><th>Статус</th></tr></thead>
+    {% for c in contracts %}
+    <tr><td><a href="{{ c.get_absolute_url }}">{{ c.number }}</a></td><td>{{ c.get_kind_display }}{% if c.parent %} к {{ c.parent.number }}{% endif %}</td>
+      <td>{{ c.supplier.name }}</td><td>{{ c.lines.all|length }}</td><td class="num">{{ c.amount|money }}</td><td>{% badge c.status c.get_status_display %}</td></tr>
+    {% empty %}<tr><td colspan="6" class="muted text-center py-3">Договоров пока нет</td></tr>{% endfor %}
+  </table>
+</div>

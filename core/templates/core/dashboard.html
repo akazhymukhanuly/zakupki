@@ -1,0 +1,46 @@
+{% extends "core/base.html" %}{% load core_tags %}
+{% block title %}Дэшборд закупщика{% endblock %}
+{% block content %}
+<div class="d-flex align-items-center mb-3">
+  <h1 class="page-title flex-grow-1">Дэшборд закупщика</h1>
+  <form method="post" action="{% url 'run_periodic' %}">{% csrf_token %}<button class="btn btn-sm btn-outline-secondary" title="Автозакрытие и SLA-напоминания (в проде — по расписанию)"><i class="bi bi-clock-history"></i> Запустить периодические задачи</button></form>
+</div>
+<div class="row g-3 mb-3">
+  <div class="col"><a href="{% url 'pool' %}" class="text-decoration-none text-reset"><div class="stat"><div class="v">{{ counters.pool }}</div><div class="l">позиций в пуле</div></div></a></div>
+  <div class="col"><a href="{% url 'pool' %}?urgent=1" class="text-decoration-none text-reset"><div class="stat"><div class="v text-danger">{{ counters.urgent }}</div><div class="l">срочных в пуле</div></div></a></div>
+  <div class="col"><div class="stat"><div class="v">{{ counters.in_procurement }}</div><div class="l">в закупках</div></div></div>
+  <div class="col"><div class="stat"><div class="v">{{ counters.contracted }}</div><div class="l">в договорах, ждут поставки</div></div></div>
+  <div class="col"><div class="stat"><div class="v text-danger">{{ counters.overdue }}</div><div class="l">просрочено по требуемому сроку</div></div></div>
+</div>
+
+<div class="row g-3">
+<div class="col-lg-6">
+  <div class="card mb-3"><div class="card-header">Позиции в пуле старше {{ stale_days }} дн. <span class="badge st-secondary">{{ stale|length }}</span></div>
+  <table class="table table-sm mb-0">
+    {% for i in stale|slice:":10" %}<tr class="{% if i.urgent %}row-urgent{% endif %}"><td><a href="{{ i.memo.get_absolute_url }}">{{ i.code }}</a></td><td>{{ i.description|truncatechars:45 }}</td><td class="num text-danger">{{ i.days_in_pool }} дн.</td></tr>
+    {% empty %}<tr><td class="muted text-center py-3">Нет</td></tr>{% endfor %}
+  </table></div>
+
+  <div class="card mb-3"><div class="card-header">Закупки без КП дольше срока <span class="badge st-secondary">{{ kp_overdue|length }}</span></div>
+  <table class="table table-sm mb-0">
+    {% for p in kp_overdue %}<tr><td><a href="{{ p.get_absolute_url }}?tab=suppliers">№{{ p.number }}</a> {{ p.title }}</td><td class="text-danger">срок {{ p.kp_deadline|date:"d.m.Y" }}</td><td>{{ p.buyer.get_full_name }}</td></tr>
+    {% empty %}<tr><td class="muted text-center py-3">Нет</td></tr>{% endfor %}
+  </table></div>
+</div>
+<div class="col-lg-6">
+  <div class="card mb-3"><div class="card-header">Требуемый срок ≤ {{ warn_days }} дн., договора нет <span class="badge st-secondary">{{ near|length }}</span></div>
+  <table class="table table-sm mb-0">
+    {% for i in near|slice:":12" %}<tr class="{% if i.urgent %}row-urgent{% endif %}"><td><a href="{{ i.memo.get_absolute_url }}">{{ i.code }}</a></td><td>{{ i.description|truncatechars:40 }}</td><td>{% badge i.status i.get_status_display %}</td>
+      <td class="text-nowrap {% if i.is_overdue %}text-danger fw-semibold{% endif %}">{{ i.required_date|date:"d.m.Y" }}</td></tr>
+    {% empty %}<tr><td class="muted text-center py-3">Нет</td></tr>{% endfor %}
+  </table></div>
+
+  <div class="card mb-3"><div class="card-header">Мои активные закупки</div>
+  <table class="table table-sm mb-0">
+    {% for p in my_procs %}<tr><td><a href="{{ p.get_absolute_url }}">№{{ p.number }}</a> {{ p.title|truncatechars:40 }}</td><td>{% badge p.status p.get_status_display %}</td>
+      <td>{% if p.decision_state != 'none' %}{% badge p.decision_state p.get_decision_state_display %}{% endif %}</td></tr>
+    {% empty %}<tr><td class="muted text-center py-3">Нет</td></tr>{% endfor %}
+  </table></div>
+</div>
+</div>
+{% endblock %}

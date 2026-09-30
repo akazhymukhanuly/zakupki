@@ -1,0 +1,66 @@
+{% extends "core/base.html" %}{% load core_tags %}
+{% block title %}Отчёты{% endblock %}
+{% block content %}
+<h1 class="page-title mb-3">Отчёты</h1>
+<ul class="nav nav-pills mb-3">
+  <li class="nav-item"><a class="nav-link {% if r == 'coverage' %}active{% endif %}" href="?r=coverage&from={{ d_from|date:'Y-m-d' }}&to={{ d_to|date:'Y-m-d' }}">Покрытие потребностей</a></li>
+  <li class="nav-item"><a class="nav-link {% if r == 'cycle' %}active{% endif %}" href="?r=cycle&from={{ d_from|date:'Y-m-d' }}&to={{ d_to|date:'Y-m-d' }}">Срок цикла</a></li>
+  <li class="nav-item"><a class="nav-link {% if r == 'savings' %}active{% endif %}" href="?r=savings&from={{ d_from|date:'Y-m-d' }}&to={{ d_to|date:'Y-m-d' }}">Экономия</a></li>
+  <li class="nav-item"><a class="nav-link {% if r == 'suppliers' %}active{% endif %}" href="?r=suppliers&from={{ d_from|date:'Y-m-d' }}&to={{ d_to|date:'Y-m-d' }}">Активность поставщиков</a></li>
+</ul>
+<form class="d-flex gap-2 align-items-end mb-3">
+  <input type="hidden" name="r" value="{{ r }}">
+  <div><label class="form-label small mb-0">С</label><input type="date" name="from" value="{{ d_from|date:'Y-m-d' }}" class="form-control form-control-sm"></div>
+  <div><label class="form-label small mb-0">По</label><input type="date" name="to" value="{{ d_to|date:'Y-m-d' }}" class="form-control form-control-sm"></div>
+  <button class="btn btn-sm btn-outline-primary">Показать</button>
+  <button class="btn btn-sm btn-outline-success" name="export" value="1"><i class="bi bi-file-earmark-excel"></i> Excel</button>
+</form>
+
+<div class="card">
+{% if r == 'coverage' %}
+<div class="card-header">Покрытие потребностей по подразделениям</div>
+<table class="table table-sm mb-0">
+  <thead><tr><th>Подразделение</th><th class="num">Подано позиций</th><th class="num">Утверждено</th><th class="num">В договоре</th><th class="num">Поставлено</th><th class="num">Просрочено</th><th style="width:200px">% поставки</th></tr></thead>
+  {% for row in rows %}<tr><td>{{ row.dept }}</td><td class="num">{{ row.submitted }}</td><td class="num">{{ row.approved }}</td><td class="num">{{ row.contracted }}</td><td class="num">{{ row.delivered }}</td>
+    <td class="num {% if row.overdue %}text-danger fw-semibold{% endif %}">{{ row.overdue }}</td>
+    <td><div class="progress"><div class="progress-bar {{ row.pct|pct_class }}" style="width:{{ row.pct }}%"></div></div><span class="small-muted">{{ row.pct }}%</span></td></tr>
+  {% empty %}<tr><td colspan="7" class="muted text-center py-3">Нет данных за период</td></tr>{% endfor %}
+</table>
+
+{% elif r == 'cycle' %}
+<div class="card-header">Срок цикла, среднее в днях: от утверждения СЗ до договора и до поставки</div>
+<div class="row g-0">
+  <div class="col-lg-6 border-end"><table class="table table-sm mb-0">
+    <thead><tr><th>Категория</th><th class="num">Строк</th><th class="num">До договора</th><th class="num">До поставки</th></tr></thead>
+    {% for row in by_cat %}<tr><td>{{ row.name }}</td><td class="num">{{ row.count }}</td><td class="num">{{ row.to_contract|default_if_none:"—" }}</td><td class="num">{{ row.to_delivery|default_if_none:"—" }}</td></tr>
+    {% empty %}<tr><td colspan="4" class="muted text-center py-3">Нет данных</td></tr>{% endfor %}
+  </table></div>
+  <div class="col-lg-6"><table class="table table-sm mb-0">
+    <thead><tr><th>Закупщик</th><th class="num">Строк</th><th class="num">До договора</th><th class="num">До поставки</th></tr></thead>
+    {% for row in by_buyer %}<tr><td>{{ row.name }}</td><td class="num">{{ row.count }}</td><td class="num">{{ row.to_contract|default_if_none:"—" }}</td><td class="num">{{ row.to_delivery|default_if_none:"—" }}</td></tr>
+    {% empty %}<tr><td colspan="4" class="muted text-center py-3">Нет данных</td></tr>{% endfor %}
+  </table></div>
+</div>
+
+{% elif r == 'savings' %}
+<div class="card-header">Экономия: выбранные КП против средней/максимальной цены по всем КП и против прошлогодней цены</div>
+<div class="table-responsive"><table class="table table-sm mb-0">
+  <thead><tr><th>Закупка</th><th class="num">Выбрано</th><th class="num">Среднее по КП</th><th class="num">Максимум по КП</th><th class="num">Экономия к среднему</th><th class="num">Экономия к максимуму</th><th class="num">К прошлому году</th></tr></thead>
+  {% for row in rows %}<tr><td><a href="{{ row.proc.get_absolute_url }}?tab=compare">№{{ row.proc.number }}</a> {{ row.proc.title|truncatechars:40 }}</td>
+    <td class="num">{{ row.chosen|money }}</td><td class="num">{{ row.avg|money }}</td><td class="num">{{ row.max|money }}</td>
+    <td class="num text-success fw-semibold">{{ row.vs_avg|money }}{% if row.vs_avg_pct is not None %} <span class="small-muted">({{ row.vs_avg_pct }}%)</span>{% endif %}</td>
+    <td class="num text-success">{{ row.vs_max|money }}</td>
+    <td class="num">{% if row.vs_last_year is not None %}{{ row.vs_last_year|money }}{% else %}<span class="small-muted">нет истории</span>{% endif %}</td></tr>
+  {% empty %}<tr><td colspan="7" class="muted text-center py-3">Нет утверждённых решений за период</td></tr>{% endfor %}
+</table></div>
+
+{% elif r == 'suppliers' %}
+<div class="card-header">Активность поставщиков</div>
+<table class="table table-sm mb-0">
+  <thead><tr><th>Поставщик</th><th class="num">Запросов получил</th><th class="num">Ответил</th><th class="num">% ответов</th><th class="num">Выиграл закупок</th><th class="num">Сумма договоров</th></tr></thead>
+  {% for row in rows %}<tr><td>{{ row.supplier.name }}</td><td class="num">{{ row.sent }}</td><td class="num">{{ row.answered }}</td><td class="num">{{ row.response_rate }}%</td><td class="num">{{ row.won }}</td><td class="num">{{ row.amount|money }}</td></tr>
+  {% empty %}<tr><td colspan="6" class="muted text-center py-3">Нет данных</td></tr>{% endfor %}
+</table>
+{% endif %}
+</div>
+{% endblock %}

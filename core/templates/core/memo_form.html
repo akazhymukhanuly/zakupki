@@ -1,0 +1,26 @@
+{% extends "core/base.html" %}
+{% block title %}{% if memo %}Редактирование {{ memo }}{% else %}Новая СЗ{% endif %}{% endblock %}
+{% block content %}
+<h1 class="page-title mb-3">{% if memo %}Редактирование шапки {{ memo }}{% else %}Новая служебная записка{% endif %}</h1>
+<div class="card" style="max-width:760px"><div class="card-body">
+<form method="post">{% csrf_token %}
+  {{ form.non_field_errors }}
+  {% for field in form %}
+  <div class="mb-3">
+    <label class="form-label">{{ field.label }}</label>{{ field }}
+    {% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}
+    {% for e in field.errors %}<div class="text-danger small">{{ e }}</div>{% endfor %}
+  </div>
+  {% endfor %}
+  {% if not memo and templates %}
+  <div class="mb-3">
+    <label class="form-label">Заполнить позиции из шаблона</label>
+    <select name="template" class="form-select"><option value="">— без шаблона —</option>
+      {% for t in templates %}<option value="{{ t.pk }}">{{ t.name }}</option>{% endfor %}</select>
+  </div>
+  {% endif %}
+  <button class="btn btn-primary">{% if memo %}Сохранить{% else %}Создать и добавить позиции{% endif %}</button>
+  <a class="btn btn-link" href="{% if memo %}{{ memo.get_absolute_url }}{% else %}{% url 'memo_list' %}{% endif %}">Отмена</a>
+</form>
+</div></div>
+{% endblock %}

@@ -1,0 +1,162 @@
+{% extends "core/base.html" %}{% load core_tags %}
+{% block title %}{{ c }}{% endblock %}
+{% block breadcrumbs %}<a href="{% url 'contract_list' %}">Договоры</a> / {{ c.number }}{% endblock %}
+{% block content %}
+<div class="d-flex align-items-start gap-3 mb-3 flex-wrap">
+  <div class="flex-grow-1">
+    <h1 class="page-title">{{ c }} <span class="fs-6 align-middle">{% badge c.status c.get_status_display %}</span></h1>
+    <div class="muted">{{ c.get_kind_display }}{% if c.parent %} к <a href="{{ c.parent.get_absolute_url }}">{{ c.parent.number }}</a>{% endif %} · от {{ c.date|date:"d.m.Y" }} · {{ c.supplier.name }}{% if c.supplier.bin %} (БИН {{ c.supplier.bin }}){% endif %}
+      {% if c.procurement %} · <a href="{{ c.procurement.get_absolute_url }}">закупка №{{ c.procurement.number }}</a>{% endif %}</div>
+  </div>
+  <div class="d-flex gap-2 flex-wrap">
+    {% if manage %}{% for s in flow %}
+    <form method="post" action="{% url 'contract_action' c.pk 'status' %}" {% if s == 'cancelled' %}data-confirm="Аннулировать договор? Позиции вернутся в пул."{% endif %}>{% csrf_token %}
+      <input type="hidden" name="status" value="{{ s }}">
+      <button class="btn btn-sm {% if s == 'cancelled' %}btn-outline-danger{% elif s == 'draft' %}btn-outline-secondary{% else %}btn-primary{% endif %}">→ {{ status_labels|get:s }}</button>
+    </form>
+    {% endfor %}{% endif %}
+    {% if c.kind != 'framework' %}
+    <div class="dropdown">
+      <button class="btn btn-sm btn-outline-success dropdown-toggle" data-bs-toggle="dropdown"><i class="bi bi-arrow-left-right"></i> Выгрузить в 1С</button>
+      <div class="dropdown-menu">
+        <form method="post" action="{% url 'contract_action' c.pk 'export' %}">{% csrf_token %}
+          <button class="dropdown-item" name="format" value="xml">XML</button>
+          <button class="dropdown-item" name="format" value="json">JSON</button>
+          <button class="dropdown-item" name="format" value="xlsx">Excel</button>
+        </form>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="row g-3 mb-3">
+  <div class="col-md-3"><div class="stat"><div class="l">Сумма</div><div class="v">{% if c.kind == 'framework' %}—{% else %}{{ c.amount|money0 }}{% endif %}</div><div class="l">{% cur %}</div></div></div>
+  <div class="col-md-3"><div class="stat"><div class="l">Оплачено</div><div class="v">{{ c.paid_total|money0 }}</div><div class="l">{% cur %}</div></div></div>
+  <div class="col-md-3"><div class="stat"><div class="l">Поставлено</div><div class="v">{{ c.delivered_percent }}%</div><div class="progress mt-1"><div class="progress-bar {{ c.delivered_percent|pct_class }}" style="width:{{ c.delivered_percent }}%"></div></div></div></div>
+  <div class="col-md-3"><div class="stat"><div class="l">СЗ в договоре</div><div class="v">{{ c.memos.count }}</div><div class="l">{% for m in c.memos %}<a href="{{ m.get_absolute_url }}">№{{ m.number }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}</div></div></div>
+</div>
+
+{% if c.exported_1c_at %}<div class="small-muted mb-2"><i class="bi bi-check2 text-success"></i> Выгружен в 1С {{ c.exported_1c_at|date:"d.m.Y H:i" }}</div>{% endif %}
+
+<ul class="nav nav-tabs mb-3">
+  <li class="nav-item"><a class="nav-link {% if tab == 'spec' %}active{% endif %}" href="?tab=spec">Спецификация</a></li>
+  <li class="nav-item"><a class="nav-link {% if tab == 'receipts' %}active{% endif %}" href="?tab=receipts">Поступления {% if unmatched %}<span class="badge bg-warning text-dark">{{ unmatched|length }}</span>{% endif %}</a></li>
+  <li class="nav-item"><a class="nav-link {% if tab == 'payments' %}active{% endif %}" href="?tab=payments">Оплаты</a></li>
+  {% if specs %}<li class="nav-item"><a class="nav-link {% if tab == 'specs' %}active{% endif %}" href="?tab=specs">Спецификации ({{ specs|length }})</a></li>{% endif %}
+  <li class="nav-item"><a class="nav-link {% if tab == 'history' %}active{% endif %}" href="?tab=history">История</a></li>
+</ul>
+
+{% if tab == 'spec' %}
+<div class="card"><div class="table-responsive">
+<table class="table table-sm mb-0">
+  <thead><tr><th>#</th><th>Позиция</th><th>СЗ</th><th>Инициатор</th><th>Наименование</th><th class="num">Кол-во</th><th class="num">Цена</th><th class="num">Сумма</th><th class="num">Поставлено</th><th class="num">Оплачено*</th></tr></thead>
+  {% for l in lines %}
+  <tr>
+    <td>{{ forloop.counter }}</td>
+    <td class="text-nowrap">{{ l.item.code }}{% if l.over_quantity_confirmed %} <i class="bi bi-exclamation-circle text-warning" title="Превышение количества подтверждено закупщиком"></i>{% endif %}</td>
+    <td><a href="{{ l.item.memo.get_absolute_url }}">№{{ l.item.memo.number }}</a></td>
+    <td class="small">{{ l.item.memo.initiator.get_full_name }}</td>
+    <td>{{ l.description }}</td>
+    <td class="num">{{ l.quantity|qty }} {{ l.unit }}</td>
+    <td class="num">{{ l.price|money }}</td>
+    <td class="num">{{ l.amount|money }}</td>
+    <td class="num {% if l.delivered_qty >= l.quantity %}text-success{% endif %}">{{ l.delivered_qty|qty }}</td>
+    <td class="num">{{ l.paid_amount|money }}</td>
+  </tr>
+  {% empty %}<tr><td colspan="10" class="muted text-center py-3">{% if c.kind == 'framework' %}Рамочный договор — строки в спецификациях к нему{% else %}Нет строк{% endif %}</td></tr>{% endfor %}
+  {% if lines %}<tfoot><tr class="fw-bold"><td colspan="7">Итого</td><td class="num">{{ c.amount|money }}</td><td></td><td class="num">{{ c.paid_total|money }}</td></tr></tfoot>{% endif %}
+</table></div>
+<div class="card-body small-muted py-2">* Оплата приходит по договору целиком и распределяется на строки пропорционально сумме — справочно, не для бухгалтерского учёта.</div>
+</div>
+
+{% elif tab == 'receipts' %}
+{% if unmatched %}
+<div class="card border-warning mb-3"><div class="card-header bg-warning-subtle">Строки поступления, требующие подтверждения</div>
+<table class="table table-sm mb-0">
+  <thead><tr><th>Документ</th><th>Из 1С</th><th class="num">Кол-во</th><th>Предложенное сопоставление</th><th></th></tr></thead>
+  {% for rl in unmatched %}
+  <tr><td class="small">{{ rl.receipt.doc_number }} от {{ rl.receipt.date|date:"d.m.Y" }}</td>
+    <td>{{ rl.raw_name }}{% if rl.raw_ref %}<div class="small-muted">{{ rl.raw_ref }}</div>{% endif %}</td>
+    <td class="num">{{ rl.quantity|qty }}</td>
+    <td>
+      {% if finance %}
+      <form method="post" action="{% url 'contract_action' c.pk 'match' %}" class="d-flex gap-2">{% csrf_token %}
+        <input type="hidden" name="rl" value="{{ rl.pk }}">
+        <select name="line" class="form-select form-select-sm">
+          {% for l in lines %}<option value="{{ l.pk }}" {% if rl.contract_line_id == l.pk %}selected{% endif %}>{{ l.item.code }} {{ l.description|truncatechars:40 }}</option>{% endfor %}
+        </select>
+        <button class="btn btn-sm btn-primary text-nowrap">Подтвердить</button>
+      </form>
+      {% endif %}
+    </td>
+    <td class="small">{{ rl.get_matched_by_display }}</td></tr>
+  {% endfor %}
+</table></div>
+{% endif %}
+<div class="row g-3">
+<div class="col-lg-7">
+<div class="card"><div class="card-header">Поступления</div>
+<table class="table table-sm mb-0">
+  <thead><tr><th>Дата</th><th>Документ</th><th>Позиция</th><th class="num">Кол-во</th><th>Сопоставлено</th></tr></thead>
+  {% for r in receipts %}{% for rl in r.lines.all %}
+  <tr class="{% if not rl.confirmed %}table-warning{% endif %}"><td>{{ r.date|date:"d.m.Y" }}</td><td class="small">{{ r.doc_number }}</td>
+    <td>{% if rl.contract_line %}{{ rl.contract_line.item.code }}{% else %}{{ rl.raw_name }}{% endif %}</td>
+    <td class="num">{{ rl.quantity|qty }}</td><td class="small">{{ rl.get_matched_by_display }}{% if not rl.confirmed %} · не подтверждено{% endif %}</td></tr>
+  {% endfor %}{% empty %}<tr><td colspan="5" class="muted text-center py-3">Поступлений нет</td></tr>{% endfor %}
+</table></div>
+</div>
+<div class="col-lg-5">
+{% if finance and c.kind != 'framework' %}
+<div class="card"><div class="card-header">Внести поступление вручную</div><div class="card-body">
+  <p class="small-muted">Обычно поступления приходят из 1С (раздел «Обмен с 1С»). Ручной ввод — для демонстрации и исключений.</p>
+  <form method="post" action="{% url 'contract_action' c.pk 'receipt' %}">{% csrf_token %}
+    <div class="row g-2 mb-2"><div class="col"><input type="date" name="date" class="form-control form-control-sm" value="{{ today|date:'Y-m-d' }}"></div>
+      <div class="col"><input name="doc" class="form-control form-control-sm" placeholder="№ документа"></div></div>
+    <table class="table table-sm">
+      {% for l in lines %}<tr><td class="small">{{ l.item.code }} {{ l.description|truncatechars:35 }}<div class="small-muted">поставлено {{ l.delivered_qty|qty }} из {{ l.quantity|qty }}</div></td>
+        <td><input name="qty_{{ l.pk }}" class="form-control form-control-sm qty-input" placeholder="0"></td></tr>{% endfor %}
+    </table>
+    <button class="btn btn-sm btn-primary">Внести</button>
+  </form>
+</div></div>
+{% endif %}
+</div>
+</div>
+
+{% elif tab == 'payments' %}
+<div class="row g-3">
+<div class="col-lg-7"><div class="card"><div class="card-header">Оплаты</div>
+<table class="table table-sm mb-0">
+  <thead><tr><th>Дата</th><th>Документ</th><th class="num">Сумма</th></tr></thead>
+  {% for p in payments %}<tr><td>{{ p.date|date:"d.m.Y" }}</td><td>{{ p.doc_number }}</td><td class="num">{{ p.amount|money }}</td></tr>
+  {% empty %}<tr><td colspan="3" class="muted text-center py-3">Оплат нет</td></tr>{% endfor %}
+  <tfoot><tr class="fw-bold"><td colspan="2">Итого</td><td class="num">{{ c.paid_total|money }}</td></tr></tfoot>
+</table></div></div>
+<div class="col-lg-5">
+{% if finance %}
+<div class="card"><div class="card-header">Внести оплату вручную</div><div class="card-body">
+  <form method="post" action="{% url 'contract_action' c.pk 'payment' %}">{% csrf_token %}
+    <div class="mb-2"><input type="date" name="date" class="form-control form-control-sm" value="{{ today|date:'Y-m-d' }}"></div>
+    <div class="mb-2"><input name="amount" class="form-control form-control-sm" placeholder="Сумма"></div>
+    <div class="mb-2"><input name="doc" class="form-control form-control-sm" placeholder="№ платёжного поручения"></div>
+    <button class="btn btn-sm btn-primary">Внести</button>
+  </form>
+</div></div>
+{% endif %}
+</div>
+</div>
+
+{% elif tab == 'specs' %}
+<div class="card"><table class="table table-sm mb-0">
+  <thead><tr><th>Номер</th><th>Дата</th><th class="num">Сумма</th><th>Статус</th></tr></thead>
+  {% for s in specs %}<tr><td><a href="{{ s.get_absolute_url }}">{{ s.number }}</a></td><td>{{ s.date|date:"d.m.Y" }}</td><td class="num">{{ s.amount|money }}</td><td>{% badge s.status s.get_status_display %}</td></tr>{% endfor %}
+</table></div>
+
+{% elif tab == 'history' %}
+<div class="card"><div class="card-body"><ul class="list-unstyled history mb-0">
+  {% for h in history %}<li><span class="small-muted">{{ h.created_at|date:"d.m.Y H:i" }} · {{ h.user.get_full_name|default:h.user|default:"система" }}</span><br>{{ h.text }}</li>
+  {% empty %}<li class="muted">Пусто</li>{% endfor %}
+</ul></div></div>
+{% endif %}
+{% endblock %}

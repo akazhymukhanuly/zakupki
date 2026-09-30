@@ -1,0 +1,223 @@
+{% extends "core/base.html" %}{% load core_tags %}
+{% block title %}{{ memo }}{% endblock %}
+{% block breadcrumbs %}<a href="{% url 'memo_list' %}">Реестр СЗ</a> / {{ memo }}{% endblock %}
+{% block content %}
+{% with st=memo.aggregate_status %}
+<div class="d-flex align-items-start gap-3 mb-3 flex-wrap">
+  <div class="flex-grow-1">
+    <h1 class="page-title">{{ memo }} <span class="fs-6 align-middle">{% badge memo.state memo.get_state_display %} {% if memo.is_approved %}{% badge st.0 st.1 %}{% endif %}</span></h1>
+    <div class="muted">{{ memo.department }} · {{ memo.initiator.get_full_name|default:memo.initiator }} · создана {{ memo.created_at|date:"d.m.Y" }}</div>
+  </div>
+  <div class="d-flex gap-2 flex-wrap">
+    {% if can_edit %}
+      <a class="btn btn-outline-secondary btn-sm" href="{% url 'memo_edit' memo.pk %}"><i class="bi bi-pencil"></i> Шапка</a>
+      <form method="post" action="{% url 'memo_action' memo.pk 'submit' %}">{% csrf_token %}<button class="btn btn-primary btn-sm"><i class="bi bi-send"></i> Отправить на согласование</button></form>
+    {% endif %}
+    {% if memo.state == 'on_approval' and is_owner %}
+      <form method="post" action="{% url 'memo_action' memo.pk 'return' %}">{% csrf_token %}<button class="btn btn-outline-secondary btn-sm">Вернуть в черновик</button></form>
+    {% endif %}
+    <a class="btn btn-outline-secondary btn-sm" href="{% url 'memo_print' memo.pk %}" target="_blank"><i class="bi bi-printer"></i> Печать / PDF</a>
+    <form method="post" action="{% url 'memo_action' memo.pk 'copy' %}">{% csrf_token %}<button class="btn btn-outline-secondary btn-sm" title="Создать новую СЗ с теми же позициями (например, на добавку)"><i class="bi bi-copy"></i> Копировать</button></form>
+    <div class="dropdown">
+      <button class="btn btn-outline-secondary btn-sm dropdown-toggle" data-bs-toggle="dropdown">Шаблон</button>
+      <div class="dropdown-menu p-3" style="width:300px">
+        <form method="post" action="{% url 'memo_action' memo.pk 'save_template' %}">{% csrf_token %}
+          <label class="form-label small">Сохранить позиции как шаблон</label>
+          <input name="name" class="form-control form-control-sm mb-2" placeholder="Название шаблона">
+          <button class="btn btn-sm btn-primary w-100">Сохранить шаблон</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-3 mb-3">
+  <div class="col-lg-8">
+    <div class="card h-100"><div class="card-body">
+      <div class="row">
+        <div class="col-sm-4"><div class="small-muted">Требуемый срок</div><div class="fw-semibold">{{ memo.required_date|date:"d.m.Y" }}</div></div>
+        <div class="col-sm-4"><div class="small-muted">Согласующий</div><div>{{ memo.approver.get_full_name|default:memo.approver|default:"руководитель подразделения" }}</div></div>
+        <div class="col-sm-4"><div class="small-muted">Утверждена</div><div>{{ memo.approved_at|date:"d.m.Y H:i"|default:"—" }}</div></div>
+      </div>
+      <div class="mt-3 small-muted">Обоснование</div>
+      <div>{{ memo.justification|linebreaksbr }}</div>
+      {% if memo.approval_comment %}<div class="mt-2 alert alert-secondary py-2 mb-0"><b>Комментарий согласующего:</b> {{ memo.approval_comment }}</div>{% endif %}
+    </div></div>
+  </div>
+  <div class="col-lg-4">
+    <div class="card h-100"><div class="card-body">
+      <div class="small-muted mb-1">Сводка по позициям</div>
+      <div class="fw-semibold mb-2">{{ memo.summary_text }}</div>
+      {% for label, n in summary %}<span class="badge st-secondary me-1 mb-1">{{ label }}: {{ n }}</span>{% endfor %}
+      {% with p=memo.progress %}
+      <div class="mt-2 small-muted">Поставлено {{ p }}% · в договоре {{ memo.coverage }}%</div>
+      <div class="progress mt-1"><div class="progress-bar {{ p|pct_class }}" style="width:{{ p }}%"></div></div>
+      {% endwith %}
+    </div></div>
+  </div>
+</div>
+{% endwith %}
+
+{% if analogs and is_owner %}
+<div class="card border-warning mb-3">
+  <div class="card-header bg-warning-subtle"><i class="bi bi-exclamation-triangle"></i> Требуется ваше подтверждение замены на аналог</div>
+  <ul class="list-group list-group-flush">
+  {% for d in analogs %}
+    <li class="list-group-item d-flex align-items-center gap-3 flex-wrap">
+      <div class="flex-grow-1">
+        <b>{{ d.procurement_line.item.code }}</b> «{{ d.procurement_line.item.description }}» →
+        <b>«{{ d.quote_line.analog_description }}»</b>
+        <div class="small-muted">{{ d.supplier }} · {{ d.quantity|qty }} {{ d.procurement_line.item.unit }} × {{ d.price|money }} {% cur %} · закупка №{{ d.procurement.number }}</div>
+      </div>
+      <form method="post" action="{% url 'analog_confirm' d.pk %}" class="d-flex gap-2">{% csrf_token %}
+        <button name="accept" value="1" class="btn btn-success btn-sm">Согласен</button>
+        <button name="accept" value="0" class="btn btn-outline-danger btn-sm">Не согласен</button>
+      </form>
+    </li>
+  {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+{% if can_approve %}
+<form method="post" action="{% url 'memo_action' memo.pk 'approve' %}" id="approveForm">{% csrf_token %}</form>
+<div class="alert alert-info d-flex gap-3 align-items-center">
+  <i class="bi bi-info-circle fs-4"></i>
+  <div>Согласование — целиком по СЗ. Чтобы отклонить отдельные позиции, отметьте их в колонке «Отклонить» и укажите причину — СЗ будет утверждена частично.</div>
+</div>
+{% endif %}
+
+<div class="card mb-3">
+  <div class="card-header d-flex align-items-center">
+    <span class="flex-grow-1">Позиции</span>
+    {% if can_edit %}<a href="#add" class="btn btn-sm btn-primary"><i class="bi bi-plus"></i> Добавить позицию</a>{% endif %}
+  </div>
+  <div class="table-responsive">
+  <table class="table table-sm mb-0">
+    <thead><tr>
+      <th>№</th><th>Наименование</th><th class="num">Кол-во</th><th>Срок</th><th>Статус</th>
+      <th>Закупка</th><th>Договор</th><th>Поставщик</th><th class="num">Покрытие</th><th class="num">Поставлено</th>
+      {% if can_approve %}<th>Отклонить</th>{% endif %}<th></th>
+    </tr></thead>
+    <tbody>
+    {% for r in rows %}{% with i=r.item %}
+    <tr class="{% if i.urgent %}row-urgent{% endif %} {% if i.status == 'withdrawn' or i.status == 'rejected' %}row-muted{% endif %}">
+      <td class="text-nowrap">{{ i.line_no }}</td>
+      <td>
+        {{ i.description }} {% if i.urgent %}<span class="badge bg-danger">срочно</span>{% endif %}
+        <div class="small-muted">{{ i.category|default:"" }}{% if i.budget_item %} · {{ i.budget_item }}{% endif %}{% if i.pool_note %} · <i>{{ i.pool_note }}</i>{% endif %}</div>
+        {% if i.reject_comment %}<div class="small text-danger">Отклонена: {{ i.reject_comment }}</div>{% endif %}
+        {% if i.remainder_closed %}<div class="small text-secondary">Остаток закрыт</div>{% endif %}
+      </td>
+      <td class="num">{{ i.quantity|qty }} {{ i.unit }}</td>
+      <td class="text-nowrap {% if i.is_overdue %}text-danger fw-semibold{% endif %}">{{ i.required_date|date:"d.m.Y" }}</td>
+      <td>{% badge i.status i.get_status_display %}</td>
+      <td class="text-nowrap">{% if r.procurement %}<a href="{{ r.procurement.get_absolute_url }}">№{{ r.procurement.number }}</a>{% else %}—{% endif %}</td>
+      <td>{% for c in r.contracts %}<a href="{{ c.get_absolute_url }}" class="d-block text-nowrap">{{ c.number }}</a>{% empty %}—{% endfor %}</td>
+      <td class="small">{{ r.suppliers|join:", "|default:"—" }}</td>
+      <td class="num">{{ i.coverage_percent }}%<div class="small-muted">{{ r.contracted|qty }} из {{ i.quantity|qty }}</div></td>
+      <td class="num">{{ r.delivered|qty }}<div class="progress mt-1"><div class="progress-bar {{ i.delivered_percent|pct_class }}" style="width:{{ i.delivered_percent }}%"></div></div></td>
+      {% if can_approve %}
+      <td style="min-width:200px">
+        <div class="form-check"><input class="form-check-input" type="checkbox" name="reject_{{ i.pk }}" form="approveForm" id="rj{{ i.pk }}" onchange="document.getElementById('rr{{ i.pk }}').classList.toggle('d-none', !this.checked)"><label class="form-check-label small" for="rj{{ i.pk }}">отклонить</label></div>
+        <input class="form-control form-control-sm d-none mt-1" name="reason_{{ i.pk }}" form="approveForm" id="rr{{ i.pk }}" placeholder="Причина">
+      </td>
+      {% endif %}
+      <td class="text-nowrap text-end">
+        {% if can_edit %}
+          <a href="{% url 'item_edit' memo.pk i.pk %}" class="btn btn-sm btn-link p-0 me-2" title="Изменить"><i class="bi bi-pencil"></i></a>
+          <form method="post" action="{% url 'item_delete' memo.pk i.pk %}" class="d-inline" data-confirm="Удалить позицию?">{% csrf_token %}<button class="btn btn-sm btn-link p-0 text-danger" title="Удалить"><i class="bi bi-trash"></i></button></form>
+        {% elif is_owner and memo.is_approved %}
+          {% if i.status == 'delivered' %}
+            <form method="post" action="{% url 'item_action' i.pk 'close' %}" class="d-inline">{% csrf_token %}<button class="btn btn-sm btn-outline-success">Получено</button></form>
+          {% elif r.pending_withdrawal %}
+            <span class="small text-warning">отзыв ждёт закупщика</span>
+          {% elif i.status in 'approved,in_procurement,partially_contracted' %}
+            <details class="d-inline-block text-start"><summary class="btn btn-sm btn-outline-secondary">Отозвать</summary>
+              <form method="post" action="{% url 'item_action' i.pk 'withdraw' %}" class="mt-2" style="min-width:220px">{% csrf_token %}
+                <input name="reason" class="form-control form-control-sm mb-1" placeholder="Причина отзыва" required>
+                <div class="small-muted mb-1">{% if i.status == 'approved' %}Позиция в пуле — отзыв сразу.{% elif i.status == 'partially_contracted' %}Будет закрыт непокрытый остаток.{% else %}Позиция в закупке — нужно подтверждение закупщика.{% endif %}</div>
+                <button class="btn btn-sm btn-danger">Отозвать</button>
+              </form>
+            </details>
+          {% endif %}
+        {% endif %}
+      </td>
+    </tr>
+    {% endwith %}{% empty %}
+    <tr><td colspan="12" class="text-center muted py-4">Позиций пока нет</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+
+{% if can_approve %}
+<div class="card mb-3 border-primary"><div class="card-body">
+  <label class="form-label">Комментарий согласующего</label>
+  <textarea name="comment" form="approveForm" class="form-control mb-2" rows="2"></textarea>
+  <div class="d-flex gap-2">
+    <button form="approveForm" class="btn btn-success"><i class="bi bi-check2"></i> Утвердить (кроме отмеченных)</button>
+    <form method="post" action="{% url 'memo_action' memo.pk 'reject' %}" class="d-flex gap-2" data-confirm="Отклонить СЗ целиком?">{% csrf_token %}
+      <input name="comment" class="form-control" placeholder="Причина отклонения всей СЗ" required style="min-width:280px">
+      <button class="btn btn-outline-danger text-nowrap">Отклонить СЗ</button>
+    </form>
+  </div>
+</div></div>
+{% endif %}
+
+{% if can_edit %}
+<div class="card mb-3" id="add">
+  <div class="card-header">Добавить позицию</div>
+  <div class="card-body">
+    <form method="post" action="{% url 'item_add' memo.pk %}">{% csrf_token %}
+      <div class="row g-2">
+        <div class="col-md-4"><label class="form-label small">Номенклатура из справочника</label>{{ item_form.nomenclature }}</div>
+        <div class="col-md-4"><label class="form-label small">или описание</label>{{ item_form.description }}</div>
+        <div class="col-md-2"><label class="form-label small">Кол-во</label>{{ item_form.quantity }}</div>
+        <div class="col-md-2"><label class="form-label small">Ед. изм.</label>{{ item_form.unit }}</div>
+        <div class="col-md-2"><label class="form-label small">Требуемый срок</label>{{ item_form.required_date }}</div>
+        <div class="col-md-3"><label class="form-label small">Категория</label>{{ item_form.category }}</div>
+        <div class="col-md-3"><label class="form-label small">Статья бюджета</label>{{ item_form.budget_item }}</div>
+        <div class="col-md-2"><label class="form-label small">Ориентир. цена</label>{{ item_form.estimated_price }}</div>
+        <div class="col-md-2 d-flex align-items-end"><div class="form-check">{{ item_form.urgent }} <label class="form-check-label">Срочно</label></div></div>
+      </div>
+      <div class="mt-3 d-flex gap-2">
+        <button class="btn btn-primary" name="add_more" value="1">Добавить</button>
+      </div>
+    </form>
+    <hr>
+    <form method="post" action="{% url 'memo_action' memo.pk 'template' %}" class="d-flex gap-2 align-items-center">{% csrf_token %}
+      <span class="small-muted">Или добавить из шаблона:</span>
+      <select name="template" class="form-select form-select-sm" style="max-width:280px">
+        {% for t in memo.department.memotemplate_set.all %}<option value="{{ t.pk }}">{{ t.name }}</option>{% endfor %}
+        {% for t in request.user.memotemplate_set.all %}<option value="{{ t.pk }}">{{ t.name }}</option>{% endfor %}
+      </select>
+      <button class="btn btn-sm btn-outline-primary">Добавить</button>
+    </form>
+  </div>
+</div>
+{% endif %}
+
+<div class="card">
+  <div class="card-header">История</div>
+  <div class="card-body"><ul class="list-unstyled history mb-0">
+    {% for h in history %}<li><span class="small-muted">{{ h.created_at|date:"d.m.Y H:i" }} · {{ h.user.get_full_name|default:h.user|default:"система" }}</span><br>{{ h.text }}</li>
+    {% empty %}<li class="muted">Пусто</li>{% endfor %}
+  </ul></div>
+</div>
+{% endblock %}
+{% block scripts %}
+{{ nom_data|json_script:"nom-data" }}
+<script>
+// При выборе номенклатуры подставляем единицу и категорию.
+const noms = JSON.parse(document.getElementById('nom-data').textContent);
+const nomSel = document.querySelector('#add [name=nomenclature]');
+if (nomSel) nomSel.addEventListener('change', () => {
+  const n = noms[nomSel.value]; if (!n) return;
+  const f = nomSel.form;
+  f.unit.value = n.unit;
+  if (n.category && f.category) f.category.value = n.category;
+});
+</script>
+{% endblock %}
