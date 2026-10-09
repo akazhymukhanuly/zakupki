@@ -4,7 +4,7 @@
   <div class="ev {{ e.kind }}"><span class="t">{{ e.created_at|date:"d.m H:i" }}</span><span><b>{% if e.user %}{{ e.user.get_full_name|default:e.user.username }}{% else %}Система{% endif %}</b> — <span class="w">{{ e.text }}</span></span></div>
   {% empty %}<div class="muted">Пока пусто</div>{% endfor %}
   <form method="post" action="{% url 'ws_comment' row.key %}" class="comment-form">{% csrf_token %}
-    <input type="hidden" name="next" value="{{ request.get_full_path }}">
+    <input type="hidden" name="next" value="{{ card_next }}">
     <input name="text" class="form-control form-control-sm" placeholder="Написать в ленту…" required>
     <button class="btn btn-sm btn-l">→</button>
   </form>

@@ -19,12 +19,12 @@
   <div class="cardact">
     {% if card.my_approval %}
       <form method="post" action="{% url 'ws_approve' card.my_approval.pk %}" class="d-flex gap-2 m-0">{% csrf_token %}
-        <input type="hidden" name="next" value="{{ request.get_full_path }}"><input type="hidden" name="approve" value="1">
+        <input type="hidden" name="next" value="{{ card_next }}"><input type="hidden" name="approve" value="1">
         <button class="btn btn-sm btn-g">✓ Согласовать</button></form>
       {% include "core/ws/_ask.html" with ask_label="Вернуть с вопросом" %}
       <details class="d-inline-block"><summary class="btn btn-sm btn-r">✕ Отклонить</summary>
         <form method="post" action="{% url 'ws_approve' card.my_approval.pk %}" class="mt-2" style="min-width:280px">{% csrf_token %}
-          <input type="hidden" name="next" value="{{ request.get_full_path }}"><input type="hidden" name="approve" value="0">
+          <input type="hidden" name="next" value="{{ card_next }}"><input type="hidden" name="approve" value="0">
           <input name="comment" class="form-control form-control-sm mb-1" placeholder="Причина (уйдёт закупщику и инициаторам)" required>
           <button class="btn btn-sm btn-r">Отклонить</button></form>
       </details>
@@ -38,12 +38,12 @@
       <a class="btn btn-sm btn-l" href="{% url 'procurement_detail' proc.pk %}?tab=decision">Решение</a>
     {% endif %}
     {% if card.can_submit %}
-      <form method="post" action="{% url 'ws_submit_decision' proc.pk %}" class="m-0">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}">
+      <form method="post" action="{% url 'ws_submit_decision' proc.pk %}" class="m-0">{% csrf_token %}<input type="hidden" name="next" value="{{ card_next }}">
         <button class="btn btn-sm btn-g">➤ Отправить на согласование ({{ proc.decision_total|money0 }} ₸)</button></form>
     {% endif %}
     {% if card.proposals %}
       <form method="post" action="{% url 'procurement_action' proc.pk 'contracts' %}" class="m-0">{% csrf_token %}
-        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+        <input type="hidden" name="next" value="{{ card_next }}">
         {% for g in card.proposals %}<input type="hidden" name="mode_{{ g.supplier.pk }}" value="{% if g.framework %}spec{% else %}new{% endif %}">{% endfor %}
         <button class="btn btn-sm btn-b">📄 Оформить договор{% if card.proposals|length > 1 %}ы ({{ card.proposals|length }}){% endif %}</button>
       </form>
@@ -100,7 +100,7 @@
 {% if card.can_quick %}
 <div class="modal fade" id="priceModal" tabindex="-1"><div class="modal-dialog modal-lg"><div class="modal-content">
   <form method="post" action="{% url 'ws_quick_price' proc.pk %}" enctype="multipart/form-data">{% csrf_token %}
-  <input type="hidden" name="next" value="{{ request.get_full_path }}">
+  <input type="hidden" name="next" value="{{ card_next }}">
   <div class="modal-header"><h5 class="modal-title">₸ Расценка: {{ row.number }}</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
   <div class="modal-body">
     <div class="muted mb-2">{{ proc.title }}. Внесите цену за единицу по каждой позиции — итог и коридор согласования посчитаются автоматически.</div>
@@ -114,8 +114,10 @@
     <div class="corridor-preview mb-3" id="pcorr">Введите цены по всем позициям</div>
     <div class="row g-2">
       <div class="col-md-6"><label class="form-label small">Поставщик *</label>
-        <select name="supplier" class="form-select form-select-sm" onchange="document.getElementById('newsup').classList.toggle('d-none', this.value!=='new')">
-          {% for s in card.suppliers %}<option value="{{ s.pk }}">{{ s.name }}{% if s.bin %} · БИН {{ s.bin }}{% endif %}</option>{% endfor %}
+        <select name="supplier" class="form-select form-select-sm" required onchange="document.getElementById('newsup').classList.toggle('d-none', this.value!=='new'); document.querySelector('#newsup input').required = this.value==='new'">
+          <option value="">— выберите поставщика —</option>
+          {% if card.suppliers_fit %}<optgroup label="Работают с этой категорией">{% for s in card.suppliers_fit %}<option value="{{ s.pk }}">{{ s.name }}{% if s.bin %} · БИН {{ s.bin }}{% endif %}</option>{% endfor %}</optgroup>{% endif %}
+          <optgroup label="{% if card.suppliers_fit %}Остальные{% else %}Все поставщики{% endif %}">{% for s in card.suppliers_other %}<option value="{{ s.pk }}">{{ s.name }}{% if s.bin %} · БИН {{ s.bin }}{% endif %}</option>{% endfor %}</optgroup>
           <option value="new">+ новый поставщик…</option>
         </select>
         <div id="newsup" class="d-none mt-1 d-flex gap-1"><input name="supplier_name" class="form-control form-control-sm" placeholder="ТОО «…»"><input name="bin" class="form-control form-control-sm" placeholder="БИН" style="max-width:130px"></div>

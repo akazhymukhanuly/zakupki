@@ -66,6 +66,7 @@ def home(request):
         "chips": _chips(u),
         "base_qs": urlencode({k: v for k, v in (("f", f), ("q", q), ("station", station or "")) if v}),
         "open_new": request.GET.get("new") == "1",
+        "card_next": f"/?sel={sel}" + (f"&{urlencode({k: v for k, v in (('f', f), ('q', q), ('station', station or '')) if v})}" if f or q else ""),
         "src_memo": _src_memo(request),
     }
     return render(request, "core/workspace.html", ctx)
@@ -160,7 +161,8 @@ def _card_context(request, key):
             "attachments": proc.attachments.all(),
             "contracts": proc.contracts.select_related("supplier").prefetch_related("lines", "payments"),
             "feed": proc.history.select_related("user").order_by("created_at"),
-            "suppliers": Supplier.objects.all(),
+            "suppliers_fit": _suppliers_fit(lines),
+            "suppliers_other": Supplier.objects.exclude(pk__in=[x.pk for x in _suppliers_fit(lines)]),
             "corridors_json": json.dumps(corridors, ensure_ascii=False),
             "can_quick": manage and proc.is_simple_method and proc.status in (
                 Procurement.Status.DRAFT, Procurement.Status.RFQ, Procurement.Status.COLLECTING, Procurement.Status.ANALYSIS)
@@ -190,6 +192,12 @@ def _card_context(request, key):
             "today": timezone.localdate(),
         }
     return None
+
+
+def _suppliers_fit(lines):
+    """Поставщики, закрывающие категории позиций закупки — в начало списка."""
+    cats = {l.item.category_id for l in lines if l.item.category_id}
+    return list(Supplier.objects.filter(categories__in=cats).distinct()) if cats else []
 
 
 # ---------------------------------------------------------------- новая потребность (как в макете: позиции без цен)

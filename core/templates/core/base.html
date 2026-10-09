@@ -73,6 +73,9 @@
 {% include "core/_help_modal.html" %}
 <script src="{% static 'vendor/bootstrap/bootstrap.bundle.min.js' %}"></script>
 <script>
+// Окна (расценка, новая потребность) переносим в <body>: иначе на широком экране «прилипающая» карточка
+// создаёт свой слой и окно оказывается под затемнением — его видно, но нельзя нажать.
+document.querySelectorAll('.modal').forEach(m => { if (m.parentElement !== document.body) document.body.appendChild(m); });
 document.addEventListener('submit', e => {
   const msg = e.target.dataset.confirm;
   if (msg && !confirm(msg)) e.preventDefault();

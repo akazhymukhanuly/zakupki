@@ -20,16 +20,16 @@
   </div>
   <div class="cardact">
     {% if card.can_edit %}
-      <form method="post" action="{% url 'memo_action' memo.pk 'submit' %}" class="m-0">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}"><button class="btn btn-sm btn-b">➤ Отправить на согласование</button></form>
+      <form method="post" action="{% url 'memo_action' memo.pk 'submit' %}" class="m-0">{% csrf_token %}<input type="hidden" name="next" value="{{ card_next }}"><button class="btn btn-sm btn-b">➤ Отправить на согласование</button></form>
       <a class="btn btn-sm btn-l" href="{{ memo.get_absolute_url }}">✎ Изменить позиции</a>
     {% endif %}
     {% if card.can_approve %}
-      <form method="post" action="{% url 'memo_action' memo.pk 'approve' %}" class="m-0">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}"><button class="btn btn-sm btn-g">✓ Согласовать</button></form>
+      <form method="post" action="{% url 'memo_action' memo.pk 'approve' %}" class="m-0">{% csrf_token %}<input type="hidden" name="next" value="{{ card_next }}"><button class="btn btn-sm btn-g">✓ Согласовать</button></form>
       {% include "core/ws/_ask.html" with ask_label="Вернуть с вопросом" %}
       <a class="btn btn-sm btn-l" href="{{ memo.get_absolute_url }}" title="Отклонить отдельные позиции с причиной">Частично…</a>
       <details class="d-inline-block"><summary class="btn btn-sm btn-r">✕ Отклонить</summary>
         <form method="post" action="{% url 'memo_action' memo.pk 'reject' %}" class="mt-2" style="min-width:280px">{% csrf_token %}
-          <input type="hidden" name="next" value="{{ request.get_full_path }}">
+          <input type="hidden" name="next" value="{{ card_next }}">
           <input name="comment" class="form-control form-control-sm mb-1" placeholder="Причина (уйдёт инициатору)" required>
           <button class="btn btn-sm btn-r">Отклонить СЗ</button></form>
       </details>
@@ -37,7 +37,7 @@
     {% if card.is_owner %}
       {% for d in card.analogs %}
       <div class="corr q w-100">Предложен аналог по <b>{{ d.procurement_line.item.code }}</b>: «{{ d.quote_line.analog_description }}» вместо «{{ d.procurement_line.item.description }}»
-        <form method="post" action="{% url 'analog_confirm' d.pk %}" class="d-flex gap-2 mt-2">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}">
+        <form method="post" action="{% url 'analog_confirm' d.pk %}" class="d-flex gap-2 mt-2">{% csrf_token %}<input type="hidden" name="next" value="{{ card_next }}">
           <button name="accept" value="1" class="btn btn-sm btn-g">Согласен</button><button name="accept" value="0" class="btn btn-sm btn-r">Не согласен</button></form>
       </div>
       {% endfor %}
@@ -74,7 +74,7 @@
     <td class="num">{{ i.quantity|qty }} {{ i.unit }}</td>
     <td>{% badge i.status i.get_status_display %}</td>
     <td class="num">{{ i.delivered_qty|qty }}<div class="muted">в дог. {{ i.contracted_qty|qty }}</div>
-      {% if card.is_owner and i.status == 'delivered' %}<form method="post" action="{% url 'item_action' i.pk 'close' %}" class="m-0 mt-1">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}"><button class="btn btn-sm btn-g py-0">Получено</button></form>{% endif %}
+      {% if card.is_owner and i.status == 'delivered' %}<form method="post" action="{% url 'item_action' i.pk 'close' %}" class="m-0 mt-1">{% csrf_token %}<input type="hidden" name="next" value="{{ card_next }}"><button class="btn btn-sm btn-g py-0">Получено</button></form>{% endif %}
     </td>
   </tr>
   {% endfor %}

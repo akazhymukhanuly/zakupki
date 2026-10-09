@@ -16,7 +16,7 @@
   <div class="cardact">
     {% if card.manage %}{% for s in card.flow %}
     <form method="post" action="{% url 'contract_action' c.pk 'status' %}" class="m-0" {% if s == 'cancelled' %}data-confirm="Аннулировать договор? Позиции вернутся в пул."{% endif %}>{% csrf_token %}
-      <input type="hidden" name="next" value="{{ request.get_full_path }}"><input type="hidden" name="status" value="{{ s }}">
+      <input type="hidden" name="next" value="{{ card_next }}"><input type="hidden" name="status" value="{{ s }}">
       <button class="btn btn-sm {% if s == 'cancelled' %}btn-r{% elif s == 'draft' %}btn-l{% else %}btn-b{% endif %}">{% if s == 'signed' %}📄 {% endif %}→ {{ card.status_labels|get:s }}</button></form>
     {% endfor %}{% endif %}
   </div>
@@ -34,7 +34,7 @@
   {% endif %}
   {% if card.finance and card.rest and c.status != 'draft' and c.status != 'cancelled' and c.status != 'closed' %}
   <form method="post" action="{% url 'contract_action' c.pk 'payment' %}" class="row g-2 align-items-end">{% csrf_token %}
-    <input type="hidden" name="next" value="{{ request.get_full_path }}">
+    <input type="hidden" name="next" value="{{ card_next }}">
     <div class="col-12 d-flex gap-1 flex-wrap"><span class="muted me-1">Быстро:</span>
       {% for pct in "30,50,100"|split_csv %}<button type="button" class="btn btn-sm btn-l py-0" onclick="this.form.amount.value=(Math.min({{ card.rest|stringformat:'s' }}, {{ c.amount|stringformat:'s' }}*{{ pct }}/100)).toFixed(2)">{{ pct }}%</button>{% endfor %}
       <button type="button" class="btn btn-sm btn-l py-0" onclick="this.form.amount.value='{{ card.rest|stringformat:'s' }}'">остаток</button></div>
