@@ -1,0 +1,13 @@
+{% for qn in card.questions %}
+<div class="corr {% if qn.is_open %}q{% endif %}">
+  💬 <b>{{ qn.asked_by.get_full_name }}</b> {{ qn.created_at|date:"d.m H:i" }}: «{{ qn.text }}»
+  {% if qn.answered_at %}<div class="mt-1">↳ <b>{{ qn.answered_by.get_full_name }}</b>: {{ qn.answer }}</div>
+  {% elif answerable %}
+  <form method="post" action="{% url 'ws_answer' qn.pk %}" class="d-flex gap-2 mt-2">{% csrf_token %}
+    <input type="hidden" name="next" value="{{ request.get_full_path }}">
+    <input name="text" class="form-control form-control-sm" placeholder="Ваш ответ" required>
+    <button class="btn btn-sm btn-w text-nowrap">💬 Ответить</button>
+  </form>
+  {% else %}<div class="muted mt-1">ждём ответа</div>{% endif %}
+</div>
+{% endfor %}

@@ -1,0 +1,90 @@
+{% load core_tags %}{% with row=card.row memo=card.memo %}
+<h2><span class="dot {{ row.dot }}"></span>{{ row.number }} · {{ row.title }}</h2>
+<div class="muted">{{ row.sub }} · {{ memo.station|default:"станция не указана" }} · {{ memo.department }}
+  {% if row.state == 'rejected' %} · <b class="text-danger">ОТКЛОНЕНО</b>{% endif %}</div>
+{% include "core/ws/_steps.html" %}
+
+{# ---- что делать сейчас ---- #}
+<div class="next-step {% if row.task %}mine{% endif %}">
+  <span class="next-step-stage">{% if row.state == 'rejected' %}Отклонено{% else %}{{ steps|get_item:row.stage }}{% endif %}</span>
+  {% if row.task %}<b class="ms-1">Ваша задача: {{ row.task|lower }}</b>{% endif %}
+  <div class="next-step-text">
+    {% if row.state == 'rejected' %}{{ memo.approval_comment|default:"СЗ отклонена." }}
+    {% elif row.stage == 0 %}Черновик. Добавьте позиции (без цен — их определит отдел закупок) и отправьте на согласование руководителю подразделения.
+    {% elif row.stage == 1 %}СЗ у руководителя подразделения. Он может утвердить её целиком или отклонить отдельные позиции.
+    {% elif row.stage == 2 %}Позиции у отдела закупок: подбор поставщика и цен. Одинаковые позиции из разных СЗ закупаются вместе.
+    {% elif row.stage == 3 %}Расценка готова, идёт согласование по коридору: {{ row.wait_who }}.
+    {% elif row.stage == 4 %}Согласовано. Закупки оформляют договор{% if row.extra.contracts|length > 1 %}ы{% endif %}.
+    {% elif row.stage == 5 %}Договор подписан: ждём поставку и оплату. Уведомление о поставке придёт по каждой позиции.
+    {% else %}Всё поставлено и закрыто.{% endif %}
+  </div>
+  <div class="cardact">
+    {% if card.can_edit %}
+      <form method="post" action="{% url 'memo_action' memo.pk 'submit' %}" class="m-0">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}"><button class="btn btn-sm btn-b">➤ Отправить на согласование</button></form>
+      <a class="btn btn-sm btn-l" href="{{ memo.get_absolute_url }}">✎ Изменить позиции</a>
+    {% endif %}
+    {% if card.can_approve %}
+      <form method="post" action="{% url 'memo_action' memo.pk 'approve' %}" class="m-0">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}"><button class="btn btn-sm btn-g">✓ Согласовать</button></form>
+      {% include "core/ws/_ask.html" with ask_label="Вернуть с вопросом" %}
+      <a class="btn btn-sm btn-l" href="{{ memo.get_absolute_url }}" title="Отклонить отдельные позиции с причиной">Частично…</a>
+      <details class="d-inline-block"><summary class="btn btn-sm btn-r">✕ Отклонить</summary>
+        <form method="post" action="{% url 'memo_action' memo.pk 'reject' %}" class="mt-2" style="min-width:280px">{% csrf_token %}
+          <input type="hidden" name="next" value="{{ request.get_full_path }}">
+          <input name="comment" class="form-control form-control-sm mb-1" placeholder="Причина (уйдёт инициатору)" required>
+          <button class="btn btn-sm btn-r">Отклонить СЗ</button></form>
+      </details>
+    {% endif %}
+    {% if card.is_owner %}
+      {% for d in card.analogs %}
+      <div class="corr q w-100">Предложен аналог по <b>{{ d.procurement_line.item.code }}</b>: «{{ d.quote_line.analog_description }}» вместо «{{ d.procurement_line.item.description }}»
+        <form method="post" action="{% url 'analog_confirm' d.pk %}" class="d-flex gap-2 mt-2">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}">
+          <button name="accept" value="1" class="btn btn-sm btn-g">Согласен</button><button name="accept" value="0" class="btn btn-sm btn-r">Не согласен</button></form>
+      </div>
+      {% endfor %}
+    {% endif %}
+    {% if not row.task and row.wait_who and not row.done %}<span class="muted">Ждём: {{ row.wait_who }}</span>{% endif %}
+  </div>
+</div>
+
+{% include "core/ws/_questions.html" with answerable=card.is_owner %}
+
+<div class="kv">
+  <b>Инициатор</b><span>{{ memo.initiator.get_full_name }} · {{ memo.department }}</span>
+  <b>Служебная записка</b><span>СЗ-{{ memo.number }} от {{ memo.submitted_at|default:memo.created_at|date:"d.m.Y" }} · <a href="{% url 'memo_print' memo.pk %}" target="_blank">документ</a></span>
+  <b>Обоснование</b><span>{{ memo.justification }}</span>
+  <b>Сумма закупа</b><span>{% if not sees_prices %}<span class="muted">🔒 скрыта</span>{% elif row.amount is None %}<span class="muted">ожидает расценки</span>{% else %}<b>{{ row.amount|money0 }} ₸</b>{% endif %}</span>
+  <b>Статья бюджета</b><span>{{ card.budget|default:"—" }}{% if sees_prices and card.budget and card.budget.limit %} <span class="muted">· остаток {{ card.budget.remainder|money0 }} ₸</span>{% endif %}</span>
+  <b>Поставщик</b><span>{{ row.supplier }}</span>
+  <b>Нужно к дате</b><span class="{% if memo.status_code == 'problem' %}late{% endif %}">{{ memo.required_date|date:"d.m.Y" }}</span>
+  {% if row.extra.procs %}<b>Закупки</b><span>{% for p in row.extra.procs %}{% if perm.procurement_view %}<a href="?sel=p{{ p.pk }}&f=all">З-{{ p.number }}</a>{% else %}З-{{ p.number }}{% endif %}{% if not forloop.last %}, {% endif %}{% endfor %}</span>{% endif %}
+  {% if row.extra.contracts %}<b>Договоры</b><span>{% for c in row.extra.contracts %}{% if perm.contract_view %}<a href="?sel=c{{ c.pk }}&f=all">{{ c.number }}</a>{% else %}{{ c.number }}{% endif %}{% if not forloop.last %}, {% endif %}{% endfor %}</span>{% endif %}
+</div>
+{% include "core/ws/_files.html" %}
+
+<div class="sect">Позиции ({{ card.items|length }}) — у каждой свой статус{% if row.amount is None %} · цены внесёт отдел закупок{% endif %}</div>
+<table class="it">
+  <thead><tr><th>#</th><th>Позиция</th><th class="num">Кол-во</th><th>Статус</th><th class="num">Поставлено</th></tr></thead>
+  <tbody>
+  {% for i in card.items %}
+  <tr>
+    <td>{{ i.line_no }}</td>
+    <td>{{ i.description }}{% if i.urgent %} <span class="badge bg-danger">срочно</span>{% endif %}{% if i.spec %}<div class="muted">{{ i.spec }}</div>{% endif %}
+      {% if i.reject_comment %}<div class="small text-danger">отклонена: {{ i.reject_comment }}</div>{% endif %}
+      {% if i.pool_note %}<div class="muted"><i>{{ i.pool_note }}</i></div>{% endif %}</td>
+    <td class="num">{{ i.quantity|qty }} {{ i.unit }}</td>
+    <td>{% badge i.status i.get_status_display %}</td>
+    <td class="num">{{ i.delivered_qty|qty }}<div class="muted">в дог. {{ i.contracted_qty|qty }}</div>
+      {% if card.is_owner and i.status == 'delivered' %}<form method="post" action="{% url 'item_action' i.pk 'close' %}" class="m-0 mt-1">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}"><button class="btn btn-sm btn-g py-0">Получено</button></form>{% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+<div class="cardact mt-3">
+  {% if perm.memo_create %}<a class="btn btn-sm btn-l" href="/?repeat={{ memo.pk }}">⟳ Повторить закупку</a>{% endif %}
+  <a class="btn btn-sm btn-l" href="{{ memo.get_absolute_url }}">Открыть полностью</a>
+  {% if card.can_ask and not card.can_approve and not card.is_owner %}{% include "core/ws/_ask.html" with ask_label="Уточнить у инициатора" %}{% endif %}
+</div>
+{% include "core/ws/_feed.html" %}
+{% endwith %}

@@ -3,91 +3,85 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}Закупки{% endblock %} · Потребности и договоры</title>
+  <title>{% block title %}Закупки{% endblock %} · Закупки ГРЭС</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23f0b429'/%3E%3Ctext x='16' y='23' font-size='18' text-anchor='middle'%3E%E2%9A%A1%3C/text%3E%3C/svg%3E">
   <link href="{% static 'vendor/bootstrap/bootstrap.min.css' %}" rel="stylesheet">
   <link href="{% static 'vendor/bootstrap-icons/bootstrap-icons.min.css' %}" rel="stylesheet">
   <link href="{% static 'core/app.css' %}" rel="stylesheet">
+  {% block head %}{% endblock %}
 </head>
-<body>
+<body class="{% block body_class %}{% endblock %}">
 {% with u=request.resolver_match.url_name %}
-<nav class="sidebar">
-  <a class="brand" href="{% url 'home' %}">Закупки<small>Потребности · закупки · договоры</small></a>
-
-  {% if perm.dashboard_buyer %}
-  <a class="nav-link {% if u == 'dashboard' %}active{% endif %}" href="{% url 'dashboard' %}"><i class="bi bi-speedometer2"></i>Дэшборд</a>
-  {% endif %}
-  <a class="nav-link {% if u == 'approvals' %}active{% endif %}" href="{% url 'approvals' %}"><i class="bi bi-inbox"></i>Входящие</a>
-
-  <div class="nav-section">Потребности</div>
-  <a class="nav-link {% if u == 'memo_list' or u == 'memo_detail' %}active{% endif %}" href="{% url 'memo_list' %}"><i class="bi bi-file-earmark-text"></i>Реестр СЗ</a>
-  {% if perm.memo_create %}
-  <a class="nav-link {% if u == 'memo_create' %}active{% endif %}" href="{% url 'memo_create' %}"><i class="bi bi-plus-circle"></i>Новая СЗ</a>
-  {% endif %}
-
-  {% if perm.pool_view or perm.procurement_view %}
-  <div class="nav-section">Закупки</div>
-  {% if perm.pool_view %}
-  <a class="nav-link {% if u == 'pool' %}active{% endif %}" href="{% url 'pool' %}"><i class="bi bi-collection"></i>Пул потребностей</a>
-  {% endif %}
-  <a class="nav-link {% if u == 'procurement_list' or u == 'procurement_detail' or u == 'quote_entry' %}active{% endif %}" href="{% url 'procurement_list' %}"><i class="bi bi-kanban"></i>Закупки</a>
-  <a class="nav-link {% if u == 'supplier_list' or u == 'supplier_edit' or u == 'supplier_create' %}active{% endif %}" href="{% url 'supplier_list' %}"><i class="bi bi-building"></i>Поставщики</a>
-  {% endif %}
-
-  {% if perm.contract_view %}
-  <div class="nav-section">Договоры</div>
-  <a class="nav-link {% if u == 'contract_list' or u == 'contract_detail' %}active{% endif %}" href="{% url 'contract_list' %}"><i class="bi bi-file-earmark-check"></i>Договоры</a>
-  {% if perm.integration_1c %}
-  <a class="nav-link {% if u == 'integration' %}active{% endif %}" href="{% url 'integration' %}"><i class="bi bi-arrow-left-right"></i>Обмен с 1С</a>
-  {% endif %}
-  {% endif %}
-
-  {% if perm.reports_view %}
-  <div class="nav-section">Аналитика</div>
-  <a class="nav-link {% if u == 'reports' %}active{% endif %}" href="{% url 'reports' %}"><i class="bi bi-bar-chart"></i>Отчёты</a>
-  {% endif %}
-
-  <div class="nav-section">Система</div>
-  <a class="nav-link {% if u == 'notifications' %}active{% endif %}" href="{% url 'notifications' %}"><i class="bi bi-bell"></i>Уведомления{% if unread_count %}<span class="badge bg-danger count">{{ unread_count }}</span>{% endif %}</a>
-  <a class="nav-link {% if u == 'rights' %}active{% endif %}" href="{% url 'rights' %}"><i class="bi bi-shield-lock"></i>Роли и права</a>
-  {% if perm.refs_import %}
-  <a class="nav-link {% if u == 'refs_import' %}active{% endif %}" href="{% url 'refs_import' %}"><i class="bi bi-upload"></i>Загрузка справочников</a>
-  {% endif %}
-  {% if user.is_staff %}
-  <a class="nav-link" href="/admin/"><i class="bi bi-gear"></i>Справочники (админ)</a>
-  {% endif %}
+<header class="gh">
+  <a class="gh-brand" href="{% url 'home' %}"><span class="brand-mark">⚡</span><span class="brand-text">Закупки ГРЭС<em>потребности · закупки · договоры</em></span></a>
+  <form class="gh-search" action="{% url 'home' %}" method="get">
+    <input name="q" value="{{ q|default:'' }}" placeholder="Поиск: номер, СЗ, поставщик, позиция…" aria-label="Поиск">
+    {% if f %}<input type="hidden" name="f" value="{% if f == 'my' %}all{% else %}{{ f }}{% endif %}">{% endif %}
+  </form>
+  <button class="btn btn-ghost btn-sm" type="button" data-bs-toggle="modal" data-bs-target="#helpModal">? Как это работает</button>
+  <div class="gh-user">
+    {% if demo_mode and demo_users %}
+    <form method="post" action="{% url 'demo_switch' %}" class="m-0 d-flex align-items-center gap-2">{% csrf_token %}
+      <span class="small text-white-50">Вы:</span>
+      <select name="username" class="form-select form-select-sm gh-select" onchange="this.form.submit()" title="Демо: войти под другим пользователем">
+        {% for du in demo_users %}<option value="{{ du.username }}" {% if du.pk == user.pk %}selected{% endif %}>{{ du.get_full_name|default:du.username }} — {{ du.profile.position|default:"" }}</option>{% endfor %}
+      </select>
+    </form>
+    {% else %}
+    <div class="text-end lh-sm"><div class="fw-semibold">{{ user.get_full_name|default:user.username }}</div><div class="small text-white-50">{{ my_roles|join:", " }}</div></div>
+    {% endif %}
+    {% if task_count %}<a href="{% url 'home' %}?f=my" class="pill" title="Мои задачи">{{ task_count }} задач</a>{% endif %}
+    <a href="{% url 'notifications' %}" class="gh-icon" title="Уведомления"><i class="bi bi-bell"></i>{% if unread_count %}<span class="gh-badge">{{ unread_count }}</span>{% endif %}</a>
+    <div class="dropdown">
+      <button class="gh-icon border-0 bg-transparent" data-bs-toggle="dropdown" title="Профиль"><i class="bi bi-person-circle"></i></button>
+      <div class="dropdown-menu dropdown-menu-end">
+        <div class="px-3 py-1 small text-muted">{{ user.get_full_name }}<br>{{ my_roles|join:", " }}</div>
+        <a class="dropdown-item" href="{% url 'password_change' %}">Сменить пароль</a>
+        <a class="dropdown-item" href="{% url 'rights' %}">Роли и права</a>
+        {% if perm.access_manage %}<a class="dropdown-item" href="{% url 'access_matrix' %}">Доступ к показателям</a>{% endif %}
+        {% if perm.refs_import %}<a class="dropdown-item" href="{% url 'refs_import' %}">Загрузка справочников</a>{% endif %}
+        {% if user.is_staff %}<a class="dropdown-item" href="/admin/">Администрирование</a>{% endif %}
+        <div class="dropdown-divider"></div>
+        <form method="post" action="{% url 'logout' %}" class="m-0">{% csrf_token %}<button class="dropdown-item">Выйти</button></form>
+      </div>
+    </div>
+  </div>
+</header>
+<nav class="gnav">
+  <a class="{% if u == 'home' %}on{% endif %}" href="{% url 'home' %}"><i class="bi bi-grid-1x2"></i> Реестр</a>
+  {% if perm.memo_create %}<a href="{% url 'home' %}?new=1"><i class="bi bi-plus-circle"></i> Новая потребность</a>{% endif %}
+  {% if perm.pool_view %}<a class="{% if u == 'pool' %}on{% endif %}" href="{% url 'pool' %}"><i class="bi bi-collection"></i> Пул</a>{% endif %}
+  {% if perm.procurement_view %}<a class="{% if u == 'procurement_list' or u == 'procurement_detail' or u == 'quote_entry' %}on{% endif %}" href="{% url 'procurement_list' %}"><i class="bi bi-kanban"></i> Закупки</a>{% endif %}
+  {% if perm.contract_view %}<a class="{% if u == 'contract_list' or u == 'contract_detail' %}on{% endif %}" href="{% url 'contract_list' %}"><i class="bi bi-file-earmark-check"></i> Договоры</a>{% endif %}
+  <a class="{% if u == 'memo_list' or u == 'memo_detail' %}on{% endif %}" href="{% url 'memo_list' %}"><i class="bi bi-file-earmark-text"></i> Реестр СЗ</a>
+  {% if perm.procurement_view %}<a class="{% if u == 'supplier_list' %}on{% endif %}" href="{% url 'supplier_list' %}"><i class="bi bi-building"></i> Поставщики</a>{% endif %}
+  {% if perm.dashboard_buyer %}<a class="{% if u == 'dashboard' %}on{% endif %}" href="{% url 'dashboard' %}"><i class="bi bi-speedometer2"></i> Дэшборд</a>{% endif %}
+  {% if perm.reports_view %}<a class="{% if u == 'reports' %}on{% endif %}" href="{% url 'reports' %}"><i class="bi bi-bar-chart"></i> Отчёты</a>{% endif %}
+  {% if perm.integration_1c %}<a class="{% if u == 'integration' %}on{% endif %}" href="{% url 'integration' %}"><i class="bi bi-arrow-left-right"></i> 1С</a>{% endif %}
 </nav>
 {% endwith %}
 
-<div class="main">
-  <div class="topbar">
-    <div class="flex-grow-1">{% block breadcrumbs %}{% endblock %}</div>
-    <a href="{% url 'notifications' %}" class="text-decoration-none position-relative me-2" title="Уведомления">
-      <i class="bi bi-bell fs-5 text-secondary"></i>
-      {% if unread_count %}<span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger" style="font-size:.6rem">{{ unread_count }}</span>{% endif %}
-    </a>
-    <div class="text-end lh-sm">
-      <div class="fw-semibold">{{ user.get_full_name|default:user.username }}</div>
-      <div class="small-muted">{{ my_roles|join:", " }} · <a href="{% url 'password_change' %}" class="small-muted">сменить пароль</a></div>
-    </div>
-    <form method="post" action="{% url 'logout' %}" class="m-0">{% csrf_token %}
-      <button class="btn btn-sm btn-outline-secondary" title="Выйти"><i class="bi bi-box-arrow-right"></i></button>
-    </form>
+<div class="{% block container_class %}content{% endblock %}">
+  {% for m in messages %}
+  <div class="alert alert-{% if m.tags == 'error' %}danger{% else %}{{ m.tags }}{% endif %} alert-dismissible fade show py-2 gmsg" role="alert">
+    {{ m }}<button type="button" class="btn-close py-2" data-bs-dismiss="alert"></button>
   </div>
-  <div class="content">
-    {% for m in messages %}
-    <div class="alert alert-{% if m.tags == 'error' %}danger{% else %}{{ m.tags }}{% endif %} alert-dismissible fade show py-2" role="alert">
-      {{ m }}<button type="button" class="btn-close py-2" data-bs-dismiss="alert"></button>
-    </div>
-    {% endfor %}
-    {% block content %}{% endblock %}
-  </div>
+  {% endfor %}
+  {% block content %}{% endblock %}
 </div>
+
+{% include "core/_help_modal.html" %}
 <script src="{% static 'vendor/bootstrap/bootstrap.bundle.min.js' %}"></script>
 <script>
-// Подтверждение опасных действий
 document.addEventListener('submit', e => {
   const msg = e.target.dataset.confirm;
   if (msg && !confirm(msg)) e.preventDefault();
+});
+// Esc закрывает открытые окна — уже в Bootstrap; «/» — фокус на поиск
+document.addEventListener('keydown', e => {
+  if (e.key === '/' && !['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName)) {
+    e.preventDefault(); document.querySelector('.gh-search input').focus();
+  }
 });
 </script>
 {% block scripts %}{% endblock %}

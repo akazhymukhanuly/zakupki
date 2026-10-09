@@ -44,6 +44,9 @@ class LoginView(auth_views.LoginView):
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
         ctx["demo_mode"] = settings.DEMO_MODE
+        if settings.DEMO_MODE:
+            from django.contrib.auth.models import User
+            ctx["demo_login_users"] = User.objects.filter(is_active=True).select_related("profile").order_by("last_name")
         return ctx
 
 

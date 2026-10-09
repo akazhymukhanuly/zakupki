@@ -1,9 +1,23 @@
 from django.urls import path
 
-from .views import contracts, dashboard, memos, pool, procurements, refs
+from .views import contracts, dashboard, memos, pool, procurements, refs, workspace as ws
+from .views.common import honor_next as hn
 
 urlpatterns = [
-    path("", dashboard.home, name="home"),
+    path("", ws.home, name="home"),
+    path("ws/new/", ws.new_memo, name="ws_new_memo"),
+    path("ws/<str:key>/ask/", ws.ask, name="ws_ask"),
+    path("ws/<str:key>/comment/", ws.comment, name="ws_comment"),
+    path("ws/<str:key>/attach/", ws.attach, name="ws_attach"),
+    path("ws/answer/<int:pk>/", ws.answer, name="ws_answer"),
+    path("ws/approve/<int:pk>/", ws.approve, name="ws_approve"),
+    path("ws/approve-green/", ws.approve_green, name="ws_approve_green"),
+    path("ws/proc/<int:pk>/quick-price/", ws.quick_price, name="ws_quick_price"),
+    path("ws/proc/<int:pk>/submit/", ws.submit_decision, name="ws_submit_decision"),
+    path("ws/export.xlsx", ws.export, name="ws_export"),
+    path("files/<int:pk>/", ws.download, name="attachment"),
+    path("demo/switch/", ws.demo_switch, name="demo_switch"),
+    path("access/", ws.access_matrix, name="access_matrix"),
     path("dashboard/", dashboard.dashboard, name="dashboard"),
     path("dashboard/periodic/", dashboard.run_periodic, name="run_periodic"),
     path("approvals/", memos.approvals, name="approvals"),
@@ -17,9 +31,9 @@ urlpatterns = [
     path("memos/<int:pk>/items/new/", memos.item_edit, name="item_add"),
     path("memos/<int:pk>/items/<int:item_pk>/", memos.item_edit, name="item_edit"),
     path("memos/<int:pk>/items/<int:item_pk>/delete/", memos.item_delete, name="item_delete"),
-    path("memos/<int:pk>/<str:action>/", memos.memo_action, name="memo_action"),
-    path("items/<int:item_pk>/<str:action>/", memos.item_action, name="item_action"),
-    path("analog/<int:pk>/", memos.analog_confirm, name="analog_confirm"),
+    path("memos/<int:pk>/<str:action>/", hn(memos.memo_action), name="memo_action"),
+    path("items/<int:item_pk>/<str:action>/", hn(memos.item_action), name="item_action"),
+    path("analog/<int:pk>/", hn(memos.analog_confirm), name="analog_confirm"),
 
     # Пул и закупки
     path("pool/", pool.pool, name="pool"),
@@ -30,14 +44,14 @@ urlpatterns = [
     path("procurements/<int:pk>/rfq/<int:rfq_pk>/quote/", procurements.quote_entry, name="quote_entry"),
     path("procurements/<int:pk>/rfq/<int:rfq_pk>/template.xlsx", procurements.quote_template, name="quote_template"),
     path("procurements/<int:pk>/rfq/<int:rfq_pk>/print/", procurements.rfq_print, name="rfq_print"),
-    path("procurements/<int:pk>/do/<str:action>/", procurements.procurement_action, name="procurement_action"),
-    path("decision-approval/<int:pk>/", procurements.decision_approve, name="decision_approve"),
+    path("procurements/<int:pk>/do/<str:action>/", hn(procurements.procurement_action), name="procurement_action"),
+    path("decision-approval/<int:pk>/", hn(procurements.decision_approve), name="decision_approve"),
 
     # Договоры и 1С
     path("contracts/", contracts.contract_list, name="contract_list"),
     path("contracts/new/", contracts.contract_create, name="contract_create"),
     path("contracts/<int:pk>/", contracts.contract_detail, name="contract_detail"),
-    path("contracts/<int:pk>/do/<str:action>/", contracts.contract_action, name="contract_action"),
+    path("contracts/<int:pk>/do/<str:action>/", hn(contracts.contract_action), name="contract_action"),
     path("integration/", contracts.integration, name="integration"),
     path("integration/template/<str:kind>/", contracts.integration_template, name="integration_template"),
 

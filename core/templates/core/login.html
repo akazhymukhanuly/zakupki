@@ -11,7 +11,7 @@
   <div class="row g-4">
     <div class="{% if demo_mode %}col-md-6{% else %}col-12{% endif %}">
       <div class="card p-4">
-        <h1 class="h4 mb-1">Закупки</h1>
+        <h1 class="h4 mb-1">⚡ Закупки ГРЭС</h1>
         <p class="muted mb-4">Потребности, закупки и договоры</p>
         {% for m in messages %}<div class="alert alert-danger py-2">{{ m }}</div>{% endfor %}
         {% if form.errors %}<div class="alert alert-danger py-2">Неверный логин или пароль</div>{% endif %}
@@ -29,15 +29,7 @@
         <h2 class="h6">Демо-пользователи</h2>
         <p class="small-muted">Пароль у всех: <code>demo12345</code>. Нажмите на логин, чтобы подставить.</p>
         <table class="table table-sm mb-0">
-          <tr><td><a href="#" data-u="ivanov">ivanov</a></td><td>Инициатор (IT-отдел)</td></tr>
-          <tr><td><a href="#" data-u="petrova">petrova</a></td><td>Инициатор (Бухгалтерия)</td></tr>
-          <tr><td><a href="#" data-u="sidorov">sidorov</a></td><td>Инициатор (Склад)</td></tr>
-          <tr><td><a href="#" data-u="head">head</a></td><td>Согласующий (руководитель)</td></tr>
-          <tr><td><a href="#" data-u="buyer">buyer</a></td><td>Закупщик</td></tr>
-          <tr><td><a href="#" data-u="director">director</a></td><td>Директор</td></tr>
-          <tr><td><a href="#" data-u="cfo">cfo</a></td><td>Финдиректор</td></tr>
-          <tr><td><a href="#" data-u="accountant">accountant</a></td><td>Бухгалтер</td></tr>
-          <tr><td><a href="#" data-u="admin">admin</a></td><td>Администратор</td></tr>
+          {% for du in demo_login_users %}<tr><td><a href="#" data-u="{{ du.username }}">{{ du.username }}</a></td><td>{{ du.get_full_name }}<div class="small text-muted">{{ du.profile.position }}</div></td></tr>{% endfor %}
         </table>
       </div>
     </div>

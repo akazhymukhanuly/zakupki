@@ -1,0 +1,157 @@
+{% load core_tags %}{% with row=card.row proc=card.proc %}
+<h2><span class="dot {{ row.dot }}"></span>{{ row.number }} · {{ proc.title }}</h2>
+<div class="muted">{{ proc.get_method_display }} ·
+  {% if proc.corridor %}{{ proc.corridor.emoji }} {{ proc.corridor.name }} коридор{% elif row.amount %}коридор определится при отправке{% else %}⚪ коридор определится после расценки{% endif %}
+  · {{ row.station }}{% if row.state == 'cancelled' %} · <b class="text-danger">ОТМЕНЕНА</b>{% endif %}</div>
+{% include "core/ws/_steps.html" %}
+
+<div class="next-step {% if row.task %}mine{% endif %}">
+  <span class="next-step-stage">{% if row.state %}Отменена{% else %}{{ steps|get_item:row.stage }}{% endif %}</span>
+  {% if row.task %}<b class="ms-1">Ваша задача: {{ row.task|lower }}</b>{% endif %}
+  <div class="next-step-text">
+    {% if proc.decision_state == 'rejected' %}<span class="text-danger">Решение отклонено: {{ proc.decision_comment }}</span> Скорректируйте расценку и отправьте снова.
+    {% elif row.stage == 2 %}{% if proc.is_simple_method %}Внесите поставщика и цену по каждой позиции — итог и коридор согласования посчитаются автоматически.{% else %}Соберите КП нескольких поставщиков, сравните и примите решение — затем отправьте на согласование.{% endif %}
+    {% elif row.stage == 3 %}Согласующие работают параллельно, срок {{ proc.corridor.sla_days }} р.д. Вопрос не сбрасывает уже полученные согласования.
+    {% elif row.stage == 4 %}Все согласования получены. Оформите договор{% if card.proposals|length > 1 %}ы (по одному на поставщика){% endif %} и прикрепите скан.
+    {% elif row.stage == 5 %}Договоры подписаны: поставки и оплаты приходят из 1С.
+    {% else %}Закупка закрыта.{% endif %}
+  </div>
+  <div class="cardact">
+    {% if card.my_approval %}
+      <form method="post" action="{% url 'ws_approve' card.my_approval.pk %}" class="d-flex gap-2 m-0">{% csrf_token %}
+        <input type="hidden" name="next" value="{{ request.get_full_path }}"><input type="hidden" name="approve" value="1">
+        <button class="btn btn-sm btn-g">✓ Согласовать</button></form>
+      {% include "core/ws/_ask.html" with ask_label="Вернуть с вопросом" %}
+      <details class="d-inline-block"><summary class="btn btn-sm btn-r">✕ Отклонить</summary>
+        <form method="post" action="{% url 'ws_approve' card.my_approval.pk %}" class="mt-2" style="min-width:280px">{% csrf_token %}
+          <input type="hidden" name="next" value="{{ request.get_full_path }}"><input type="hidden" name="approve" value="0">
+          <input name="comment" class="form-control form-control-sm mb-1" placeholder="Причина (уйдёт закупщику и инициаторам)" required>
+          <button class="btn btn-sm btn-r">Отклонить</button></form>
+      </details>
+    {% endif %}
+    {% if card.can_quick %}
+      <button class="btn btn-sm btn-b" type="button" data-bs-toggle="modal" data-bs-target="#priceModal">₸ Внести цены и поставщика</button>
+    {% endif %}
+    {% if card.manage and row.stage == 2 and not row.state and not proc.is_simple_method %}
+      <a class="btn btn-sm btn-b" href="{% url 'procurement_detail' proc.pk %}?tab=suppliers">Запросы КП</a>
+      <a class="btn btn-sm btn-l" href="{% url 'procurement_detail' proc.pk %}?tab=compare">Сравнение</a>
+      <a class="btn btn-sm btn-l" href="{% url 'procurement_detail' proc.pk %}?tab=decision">Решение</a>
+    {% endif %}
+    {% if card.can_submit %}
+      <form method="post" action="{% url 'ws_submit_decision' proc.pk %}" class="m-0">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}">
+        <button class="btn btn-sm btn-g">➤ Отправить на согласование ({{ proc.decision_total|money0 }} ₸)</button></form>
+    {% endif %}
+    {% if card.proposals %}
+      <form method="post" action="{% url 'procurement_action' proc.pk 'contracts' %}" class="m-0">{% csrf_token %}
+        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+        {% for g in card.proposals %}<input type="hidden" name="mode_{{ g.supplier.pk }}" value="{% if g.framework %}spec{% else %}new{% endif %}">{% endfor %}
+        <button class="btn btn-sm btn-b">📄 Оформить договор{% if card.proposals|length > 1 %}ы ({{ card.proposals|length }}){% endif %}</button>
+      </form>
+      {% for g in card.proposals %}{% if g.framework %}<span class="muted">{{ g.supplier.name }}: спецификация к рамочному {{ g.framework.number }}</span>{% endif %}{% endfor %}
+    {% endif %}
+    {% if card.withdrawals %}<a class="btn btn-sm btn-w" href="{% url 'procurement_detail' proc.pk %}">Запрос на отзыв ({{ card.withdrawals|length }})</a>{% endif %}
+    {% if not row.task and row.wait_who and not row.done %}<span class="muted">Ждём: {{ row.wait_who }}</span>{% endif %}
+  </div>
+</div>
+
+{% if card.approvals %}
+<div class="sect">Согласующие{% if proc.corridor %} · {{ proc.corridor.emoji }} {{ proc.corridor.name }}, срок {{ proc.corridor.sla_days }} р.д.{% endif %}</div>
+<div class="appr">
+  {% for a in card.approvals %}<span class="{% if a.state == 'approved' %}ok{% elif a.state == 'rejected' %}bad{% elif a.is_overdue %}over{% else %}wait{% endif %}" title="{% if a.user %}{{ a.user.get_full_name }} {{ a.decided_at|date:'d.m H:i' }}{% else %}срок до {{ a.due_at|date:'d.m H:i' }}{% endif %}{% if a.comment %} — {{ a.comment }}{% endif %}">
+    {% if a.state == 'approved' %}✓{% elif a.state == 'rejected' %}✕{% elif a.is_overdue %}⏰{% else %}⏳{% endif %} {{ a.role|short_role }}</span>{% endfor %}
+</div>
+{% endif %}
+
+{% include "core/ws/_questions.html" with answerable=card.manage %}
+
+<div class="kv">
+  <b>Закупщик</b><span>{{ proc.buyer.get_full_name }}</span>
+  <b>Способ закупа</b><span>{{ proc.get_method_display }}</span>
+  <b>Служебные записки</b><span>{% for m in proc.memos %}<a href="?sel=m{{ m.pk }}&f=all">СЗ-{{ m.number }}</a> <span class="muted">{{ m.initiator.get_full_name }}</span>{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}</span>
+  <b>Сумма закупа</b><span>{% if row.amount is None %}<span class="muted">ожидает расценки</span>{% else %}<b>{{ row.amount|money0 }} ₸</b>{% endif %}</span>
+  <b>Поставщик</b><span>{{ row.supplier }}</span>
+  <b>Условия оплаты</b><span>{{ proc.payment_terms|default:"—" }}</span>
+  {% if proc.kp_deadline %}<b>Срок сбора КП</b><span>{{ proc.kp_deadline|date:"d.m.Y" }}</span>{% endif %}
+  {% if card.contracts %}<b>Договоры</b><span>{% for c in card.contracts %}<a href="?sel=c{{ c.pk }}&f=all">{{ c.number }}</a> <span class="muted">{{ c.get_status_display|lower }}</span>{% if not forloop.last %}, {% endif %}{% endfor %}</span>{% endif %}
+</div>
+{% include "core/ws/_files.html" %}
+
+<div class="sect">Позиции ({{ card.lines|length }}) — из каких СЗ</div>
+<table class="it">
+  <thead><tr><th>Позиция</th><th class="num">Кол-во</th><th>Поставщик</th><th class="num">Цена</th><th class="num">Сумма</th></tr></thead>
+  <tbody>
+  {% for l in card.lines %}{% if l.state != 'removed' %}
+  <tr class="{% if l.state == 'released' %}text-muted{% endif %}">
+    <td>{{ l.item.description }}<div class="muted">{{ l.item.code }} · {{ l.item.memo.initiator.get_full_name }}{% if l.state == 'released' %} · возвращена в пул{% endif %}</div></td>
+    <td class="num">{{ l.quantity|qty }} {{ l.item.unit }}</td>
+    {% with dls=l.decision_lines.all %}
+    <td>{% for d in dls %}{{ d.supplier.name }}{% if d.quote_line.is_analog %} <span class="cell-analog">аналог</span>{% endif %}{% if not forloop.last %}<br>{% endif %}{% empty %}<span class="muted">—</span>{% endfor %}</td>
+    <td class="num">{% for d in dls %}{{ d.price|money0 }}{% if not forloop.last %}<br>{% endif %}{% endfor %}</td>
+    <td class="num">{% for d in dls %}{{ d.amount|money0 }}{% if not forloop.last %}<br>{% endif %}{% endfor %}</td>
+    {% endwith %}
+  </tr>
+  {% endif %}{% endfor %}
+  {% if row.amount %}<tr><td colspan="4" class="num"><b>Итого</b></td><td class="num"><b>{{ row.amount|money0 }}</b></td></tr>{% endif %}
+  </tbody>
+</table>
+<div class="cardact mt-3"><a class="btn btn-sm btn-l" href="{% url 'procurement_detail' proc.pk %}">Открыть полностью (КП, сравнение, решение, история)</a></div>
+{% include "core/ws/_feed.html" %}
+
+{% if card.can_quick %}
+<div class="modal fade" id="priceModal" tabindex="-1"><div class="modal-dialog modal-lg"><div class="modal-content">
+  <form method="post" action="{% url 'ws_quick_price' proc.pk %}" enctype="multipart/form-data">{% csrf_token %}
+  <input type="hidden" name="next" value="{{ request.get_full_path }}">
+  <div class="modal-header"><h5 class="modal-title">₸ Расценка: {{ row.number }}</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+  <div class="modal-body">
+    <div class="muted mb-2">{{ proc.title }}. Внесите цену за единицу по каждой позиции — итог и коридор согласования посчитаются автоматически.</div>
+    <table class="it mb-2"><thead><tr><th>Позиция</th><th class="num">Кол-во</th><th style="width:160px">Цена за ед., ₸</th><th class="num">Сумма</th></tr></thead><tbody>
+      {% for l in card.lines %}{% if l.state == 'active' %}
+      <tr><td>{{ l.item.description }}<div class="muted">{{ l.item.spec }}</div></td><td class="num">{{ l.quantity|qty }} {{ l.item.unit }}</td>
+        <td><input class="form-control form-control-sm text-end pr" name="price_{{ l.pk }}" data-qty="{{ l.quantity|stringformat:'s' }}" inputmode="decimal" required></td>
+        <td class="num ls">—</td></tr>
+      {% endif %}{% endfor %}
+    </tbody><tfoot><tr><td colspan="3" class="num"><b>Итого</b></td><td class="num" id="ptot"><b>—</b></td></tr></tfoot></table>
+    <div class="corridor-preview mb-3" id="pcorr">Введите цены по всем позициям</div>
+    <div class="row g-2">
+      <div class="col-md-6"><label class="form-label small">Поставщик *</label>
+        <select name="supplier" class="form-select form-select-sm" onchange="document.getElementById('newsup').classList.toggle('d-none', this.value!=='new')">
+          {% for s in card.suppliers %}<option value="{{ s.pk }}">{{ s.name }}{% if s.bin %} · БИН {{ s.bin }}{% endif %}</option>{% endfor %}
+          <option value="new">+ новый поставщик…</option>
+        </select>
+        <div id="newsup" class="d-none mt-1 d-flex gap-1"><input name="supplier_name" class="form-control form-control-sm" placeholder="ТОО «…»"><input name="bin" class="form-control form-control-sm" placeholder="БИН" style="max-width:130px"></div>
+      </div>
+      <div class="col-md-6"><label class="form-label small">Способ закупа</label>
+        <select name="method" class="form-select form-select-sm">{% for code, label in card.methods %}{% if code != 'rfq' and code != 'tender' %}<option value="{{ code }}" {% if proc.method == code %}selected{% endif %}>{{ label }}</option>{% endif %}{% endfor %}</select></div>
+      <div class="col-md-6"><label class="form-label small">Условия оплаты</label><input name="pay" class="form-control form-control-sm" placeholder="Напр.: 100% в течение 10 р.д. после поставки"></div>
+      <div class="col-md-6"><label class="form-label small">КП / счета (можно несколько)</label><input type="file" name="files" multiple class="form-control form-control-sm"></div>
+    </div>
+  </div>
+  <div class="modal-footer"><button type="button" class="btn btn-l" data-bs-dismiss="modal">Отмена</button><button class="btn btn-g">Сохранить и отправить на согласование</button></div>
+  </form>
+</div></div></div>
+<script>
+(() => {
+  const corridors = {{ card.corridors_json|safe }};
+  const byContract = {% if proc.method == 'contract' %}true{% else %}false{% endif %};
+  const fmt = n => n.toLocaleString('ru-RU', {maximumFractionDigits: 2}) + ' ₸';
+  const num = v => parseFloat(String(v).replace(/\s/g, '').replace(',', '.'));
+  const calc = () => {
+    let tot = 0, ok = true;
+    document.querySelectorAll('#priceModal .pr').forEach(inp => {
+      const p = num(inp.value), q = num(inp.dataset.qty), cell = inp.closest('tr').querySelector('.ls');
+      if (p > 0) { tot += p * q; cell.textContent = fmt(p * q); } else { ok = false; cell.textContent = '—'; }
+    });
+    const te = document.getElementById('ptot'), ce = document.getElementById('pcorr');
+    if (!ok) { te.innerHTML = '<b>—</b>'; ce.textContent = 'Введите цены по всем позициям'; return; }
+    te.innerHTML = '<b>' + fmt(tot) + '</b>';
+    const method = document.querySelector('#priceModal [name=method]').value;
+    let c = (method === 'contract' || byContract) ? corridors.find(c => c.by_contract) : null;
+    if (!c) c = corridors.filter(c => !c.by_contract).sort((a, b) => (a.max ?? Infinity) - (b.max ?? Infinity)).find(c => c.max === null || tot <= c.max);
+    ce.innerHTML = c ? `<b>${c.emoji} ${c.name}</b> → согласуют: <b>${c.roles}</b>. Срок: ${c.sla} р.д.` : '';
+  };
+  document.querySelectorAll('#priceModal .pr, #priceModal [name=method]').forEach(i => i.addEventListener('input', calc));
+  document.querySelector('#priceModal [name=method]').addEventListener('change', calc);
+})();
+</script>
+{% endif %}
+{% endwith %}

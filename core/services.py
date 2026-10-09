@@ -18,8 +18,8 @@ from django.utils import timezone
 
 from . import roles
 from .models import (
-    ZERO, ApprovalRule, Contract, Counter, ContractLine, DecisionApproval, DecisionLine, HistoryEntry, Memo, MemoItem,
-    Notification, Payment, Procurement, ProcurementLine, Quote, QuoteLine, Receipt, ReceiptLine, ReminderLog, RFQ,
+    ZERO, Attachment, Contract, Corridor, Counter, ContractLine, DecisionApproval, DecisionLine, HistoryEntry, Memo, MemoItem,
+    Notification, Payment, Procurement, ProcurementLine, Question, Quote, QuoteLine, Receipt, ReceiptLine, ReminderLog, RFQ,
     Supplier, WithdrawalRequest,
 )
 
@@ -44,8 +44,21 @@ def fmt_qty(value):
 # ---------------------------------------------------------------- журнал и уведомления
 
 
-def log(text, user=None, memo=None, procurement=None, contract=None):
-    HistoryEntry.objects.create(text=text, user=user, memo=memo, procurement=procurement, contract=contract)
+def log(text, user=None, memo=None, procurement=None, contract=None, kind=""):
+    """Запись в ленту решений (неизменяемую). kind: ok / q / bad / auto / comment."""
+    HistoryEntry.objects.create(text=text, user=user, memo=memo, procurement=procurement, contract=contract,
+                                kind=kind or ("" if user else "auto"))
+
+
+def add_business_days(dt, days):
+    """Срок согласования в рабочих днях (сб/вс пропускаются)."""
+    d = dt
+    added = 0
+    while added < days:
+        d += timedelta(days=1)
+        if d.weekday() < 5:
+            added += 1
+    return d
 
 
 def notify(users, text, url=""):
@@ -205,7 +218,7 @@ def submit_memo(memo, user):
     recalc_memo(memo)
     log("СЗ отправлена на согласование", user, memo=memo)
     approvers = [memo.approver] if memo.approver else list(users_with_role(roles.APPROVER))
-    notify(approvers, f"{memo} от {memo.initiator.get_full_name() or memo.initiator} ждёт согласования", memo.get_absolute_url())
+    notify(approvers, f"{memo} от {memo.initiator.get_full_name() or memo.initiator} ждёт согласования", memo_card_url(memo))
 
 
 @transaction.atomic
@@ -236,8 +249,11 @@ def approve_memo(memo, user, rejected_items=None, comment=""):
     memo.save()
     recalc_items(items)
     recalc_memo(memo)
-    log(f"СЗ согласована: {memo.get_state_display()}" + (f". {comment}" if comment else ""), user, memo=memo)
-    notify([memo.initiator], f"{memo}: {memo.get_state_display().lower()}", memo.get_absolute_url())
+    kind = "bad" if memo.state == Memo.State.REJECTED else "ok"
+    log(f"СЗ согласована: {memo.get_state_display()}" + (f". {comment}" if comment else ""), user, memo=memo, kind=kind)
+    if approved:
+        log("Позиции переданы в отдел закупок для расценки", memo=memo, kind="auto")
+    notify([memo.initiator], f"{memo}: {memo.get_state_display().lower()}", memo_card_url(memo))
     if approved:
         notify(users_with_role(roles.BUYER), f"В пуле новые позиции из {memo} ({len(approved)} шт.)", "/pool/")
 
@@ -255,8 +271,8 @@ def reject_memo(memo, user, comment):
     memo.save()
     recalc_items(memo.items.all())
     recalc_memo(memo)
-    log(f"СЗ отклонена: {comment}", user, memo=memo)
-    notify([memo.initiator], f"{memo} отклонена: {comment}", memo.get_absolute_url())
+    log(f"ОТКЛОНЕНО: {comment}", user, memo=memo, kind="bad")
+    notify([memo.initiator], f"{memo} отклонена: {comment}", memo_card_url(memo))
 
 
 @transaction.atomic
@@ -307,7 +323,7 @@ def withdraw_item(item, user, reason):
         req = WithdrawalRequest.objects.create(item=item, procurement=active.procurement, requested_by=user, reason=reason)
         log(f"Запрос на отзыв позиции {item.code}: {reason}", user, memo=item.memo, procurement=active.procurement)
         notify([active.procurement.buyer], f"Инициатор просит отозвать позицию {item.code} из закупки №{active.procurement.number}",
-               active.procurement.get_absolute_url())
+               proc_card_url(active.procurement))
         return req
     contracted = item.contracted_qty
     if contracted >= item.quantity or (contracted > 0 and item.remaining_qty == 0):
@@ -352,7 +368,7 @@ def resolve_withdrawal(req, user, approve):
         log(f"Отзыв позиции {item.code} подтверждён закупщиком", user, memo=item.memo, procurement=req.procurement)
     else:
         log(f"Отзыв позиции {item.code} отклонён закупщиком", user, memo=item.memo, procurement=req.procurement)
-    notify([req.requested_by], f"Запрос на отзыв {item.code}: {req.get_state_display().lower()}", item.memo.get_absolute_url())
+    notify([req.requested_by], f"Запрос на отзыв {item.code}: {req.get_state_display().lower()}", memo_card_url(item.memo))
 
 
 @transaction.atomic
@@ -373,8 +389,10 @@ def close_item(item, user):
 def create_procurement(user, items, title, method=Procurement.Method.RFQ, kp_deadline=None, buyer=None):
     if not items:
         raise BusinessError("Выберите позиции из пула.")
+    stations = {i.memo.station_id for i in items}
     proc = Procurement.objects.create(
-        title=title or "Закупка", buyer=buyer or user, method=method, kp_deadline=kp_deadline
+        title=title or "Закупка", buyer=buyer or user, method=method, kp_deadline=kp_deadline,
+        station_id=stations.pop() if len(stations) == 1 else None,
     )
     add_items_to_procurement(proc, items, user)
     log(f"Закупка создана из {len(items)} поз.", user, procurement=proc)
@@ -532,7 +550,7 @@ def save_quote(rfq, header, rows, user=None, source=Quote.Source.MANUAL):
         proc.save(update_fields=["status"])
     log(f"КП {rfq.supplier}: сохранено ({quote.get_source_display()})", user, procurement=proc)
     if source == Quote.Source.PORTAL:
-        notify([proc.buyer], f"{rfq.supplier} заполнил КП по закупке №{proc.number}", proc.get_absolute_url() + "?tab=quotes")
+        notify([proc.buyer], f"{rfq.supplier} заполнил КП по закупке №{proc.number}", proc_card_url(proc))
     return quote
 
 
@@ -649,7 +667,7 @@ def request_analog_confirmations(proc, user):
         ReminderLog.objects.create(key=key)
         notify([item.memo.initiator],
                f"По позиции {item.code} «{item.description}» предложен аналог: «{d.quote_line.analog_description}» "
-               f"({d.supplier}). Подтвердите замену.", item.memo.get_absolute_url())
+               f"({d.supplier}). Подтвердите замену.", memo_card_url(item.memo))
 
 
 def decision_preset(proc, mode, user, quote=None):
@@ -685,7 +703,7 @@ def confirm_analog(decision_line, user, accept):
     log(f"Инициатор {'согласен' if accept else 'не согласен'} на аналог по {item.code}", user,
         memo=item.memo, procurement=proc)
     notify([proc.buyer], f"Аналог по {item.code}: инициатор {'согласен' if accept else 'не согласен'}",
-           proc.get_absolute_url() + "?tab=decision")
+           proc_card_url(proc))
 
 
 @transaction.atomic
@@ -701,17 +719,36 @@ def submit_decision(proc, user):
     if declined:
         raise BusinessError("Инициатор отказался от аналога — измените решение по этим позициям.")
     total = proc.decision_total
+    corridor = Corridor.for_amount(total, by_contract=proc.method == Procurement.Method.CONTRACT)
     proc.approvals.all().delete()
-    needed = list(ApprovalRule.objects.filter(min_amount__lte=total).values_list("role", flat=True).distinct())
+    proc.corridor = corridor
+    proc.decision_submitted_at = timezone.now()
+    needed = corridor.role_list if corridor else []
     if not needed:
+        proc.save(update_fields=["corridor", "decision_submitted_at"])
         _approve_decision(proc, user, auto=True)
         return
+    due = add_business_days(timezone.now(), corridor.sla_days)
     for role in needed:
-        DecisionApproval.objects.create(procurement=proc, role=role)
+        DecisionApproval.objects.create(procurement=proc, role=role, due_at=due)
     proc.decision_state = Procurement.DecisionState.ON_APPROVAL
-    proc.save(update_fields=["decision_state"])
-    log(f"Решение на сумму {total:,.2f} отправлено на согласование: {', '.join(needed)}", user, procurement=proc)
-    notify(users_with_role(*needed), f"Решение по закупке №{proc.number} на {total:,.0f} ждёт согласования", proc.get_absolute_url() + "?tab=decision")
+    proc.save(update_fields=["decision_state", "corridor", "decision_submitted_at"])
+    log(f"Расценка выполнена: итог {total:,.0f} ₸".replace(",", " "), user, procurement=proc)
+    log(f"Коридор {corridor.emoji} {corridor.name.lower()} → согласующие: {', '.join(roles.SHORT.get(r, r) for r in needed)}"
+        f" параллельно, срок {corridor.sla_days} р.д.", procurement=proc, kind="auto")
+    for memo in proc.memos:
+        log("Расценка завершена → отправлено на согласование", memo=memo, kind="auto")
+    notify(users_with_role(*needed), f"Закупка №{proc.number} «{proc.title}» ждёт вашего согласования "
+                                     f"({corridor.emoji} {total:,.0f} ₸, срок {corridor.sla_days} р.д.)".replace(",", " "),
+           proc_card_url(proc))
+
+
+def proc_card_url(proc):
+    return f"/?sel=p{proc.pk}"
+
+
+def memo_card_url(memo):
+    return f"/?sel=m{memo.pk}"
 
 
 @transaction.atomic
@@ -721,20 +758,129 @@ def resolve_decision_approval(approval, user, approve, comment=""):
         raise BusinessError("Согласование неактуально.")
     if not roles.has_role(user, approval.role, roles.ADMIN):
         raise BusinessError(f"Согласовать может только роль «{approval.role}».")
+    if not approve and not comment.strip():
+        raise BusinessError("Укажите причину отклонения — она уйдёт закупщику и инициатору.")
     approval.state = DecisionApproval.State.APPROVED if approve else DecisionApproval.State.REJECTED
     approval.user = user
     approval.comment = comment
     approval.decided_at = timezone.now()
     approval.save()
-    log(f"{approval.role}: решение {'согласовано' if approve else 'отклонено'}. {comment}", user, procurement=proc)
-    if not approve:
+    who = roles.SHORT.get(approval.role, approval.role)
+    if approve:
+        log("СОГЛАСОВАНО" + (f": {comment}" if comment else ""), user, procurement=proc, kind="ok")
+    else:
+        log(f"ОТКЛОНЕНО: {comment}", user, procurement=proc, kind="bad")
         proc.decision_state = Procurement.DecisionState.REJECTED
         proc.decision_comment = comment
         proc.save(update_fields=["decision_state", "decision_comment"])
-        notify([proc.buyer], f"Решение по закупке №{proc.number} отклонено ({approval.role}): {comment}", proc.get_absolute_url() + "?tab=decision")
+        proc.approvals.filter(state=DecisionApproval.State.PENDING).delete()
+        for memo in proc.memos:
+            log(f"Решение по закупке №{proc.number} отклонено ({who}): {comment}", memo=memo, kind="bad")
+        notify([proc.buyer], f"Решение по закупке №{proc.number} отклонено ({who}): {comment}", proc_card_url(proc))
         return
     if not proc.approvals.filter(state=DecisionApproval.State.PENDING).exists():
         _approve_decision(proc, user)
+
+
+def approvals_for(user):
+    """Ожидающие согласования, которые может дать пользователь."""
+    qs = DecisionApproval.objects.filter(
+        state=DecisionApproval.State.PENDING, procurement__decision_state=Procurement.DecisionState.ON_APPROVAL,
+    ).select_related("procurement", "procurement__corridor")
+    if not roles.has_role(user, roles.ADMIN):
+        qs = qs.filter(role__in=roles.user_roles(user))
+    return qs
+
+
+@transaction.atomic
+def approve_all_green(user):
+    """«Согласовать все зелёные» — массово по зелёному коридору (как в макете)."""
+    done = 0
+    for a in approvals_for(user).filter(procurement__corridor__color="g"):
+        resolve_decision_approval(a, user, True, "массово (зелёный коридор)")
+        done += 1
+    return done
+
+
+# ---------------------------------------------------------------- вопросы, лента, файлы
+
+
+@transaction.atomic
+def ask_question(user, text, memo=None, procurement=None):
+    """Вопрос не сбрасывает уже полученные согласования. По СЗ отвечает инициатор, по закупке — закупщик."""
+    if not text.strip():
+        raise BusinessError("Напишите вопрос.")
+    q = Question.objects.create(memo=memo, procurement=procurement, asked_by=user, text=text.strip())
+    if memo:
+        log(f"вопрос: {q.text}", user, memo=memo, kind="q")
+        notify([memo.initiator], f"Вопрос по {memo} от {user.get_full_name()}: «{q.text}»", memo_card_url(memo))
+    else:
+        log(f"вопрос: {q.text}", user, procurement=procurement, kind="q")
+        notify([procurement.buyer], f"Вопрос по закупке №{procurement.number} от {user.get_full_name()}: «{q.text}»",
+               proc_card_url(procurement))
+    return q
+
+
+@transaction.atomic
+def answer_question(q, user, text):
+    if not q.is_open:
+        raise BusinessError("На вопрос уже ответили.")
+    owner = q.memo.initiator if q.memo else q.procurement.buyer
+    if user != owner and not roles.has_role(user, roles.ADMIN, roles.BUYER):
+        raise BusinessError("Ответить может инициатор СЗ или закупщик.")
+    if not text.strip():
+        raise BusinessError("Напишите ответ.")
+    q.answer, q.answered_by, q.answered_at = text.strip(), user, timezone.now()
+    q.save()
+    log(f"ответил: {q.answer}", user, memo=q.memo, procurement=q.procurement)
+    url = memo_card_url(q.memo) if q.memo else proc_card_url(q.procurement)
+    notify([q.asked_by], f"Ответ на ваш вопрос «{q.text[:60]}»: {q.answer}", url)
+
+
+def add_comment(user, text, memo=None, procurement=None, contract=None):
+    if not text.strip():
+        raise BusinessError("Пустой комментарий.")
+    log(text.strip(), user, memo=memo, procurement=procurement, contract=contract, kind="comment")
+
+
+def add_attachment(user, upload, kind, memo=None, procurement=None, contract=None):
+    if upload.size > 25 * 1024 * 1024:
+        raise BusinessError("Файл больше 25 МБ.")
+    a = Attachment.objects.create(memo=memo, procurement=procurement, contract=contract, kind=kind,
+                                  file=upload, name=upload.name[:255], uploaded_by=user)
+    log(f"прикреплён файл «{a.name}» ({a.get_kind_display().lower()})", user,
+        memo=memo, procurement=procurement, contract=contract)
+    return a
+
+
+# ---------------------------------------------------------------- быстрая расценка (один поставщик, как в макете)
+
+
+@transaction.atomic
+def quick_price(proc, supplier, prices, user, payment_terms="", submit=True):
+    """Закупщик вносит одного поставщика и цены по каждой позиции — система сама считает итог и коридор.
+
+    Под капотом — те же сущности ТЗ (запрос КП, КП, решение), поэтому дальше всё работает одинаково.
+    prices: {procurement_line_id: Decimal}
+    """
+    if not proc.is_simple_method:
+        raise BusinessError("Быстрая расценка — для закупок из одного источника / по договору. "
+                            "Для запроса ценовых предложений и тендера соберите КП нескольких поставщиков.")
+    lines = list(proc.lines.filter(state=ProcurementLine.State.ACTIVE))
+    missing = [l.item.code for l in lines if not prices.get(l.pk) or prices[l.pk] <= 0]
+    if missing:
+        raise BusinessError("Укажите цену по каждой позиции: " + ", ".join(missing))
+    add_rfqs(proc, [supplier], user)
+    rfq = proc.rfqs.get(supplier=supplier)
+    if rfq.sent_at is None:
+        mark_rfqs_sent(proc, user, [rfq])
+    save_quote(rfq, {"payment_terms": payment_terms}, {l.pk: {"price": prices[l.pk]} for l in lines}, user)
+    if payment_terms:
+        proc.payment_terms = payment_terms
+        proc.save(update_fields=["payment_terms"])
+    decision_preset(proc, "single", user, rfq.quote)
+    if submit:
+        submit_decision(proc, user)
 
 
 def _approve_decision(proc, user, auto=False):
@@ -751,8 +897,11 @@ def _approve_decision(proc, user, auto=False):
         recalc_item(line.item)
     for d in proc.decision_lines.select_related("procurement_line__item"):
         recalc_item(d.procurement_line.item)
-    log("Решение утверждено" + (" (ниже порогов согласования)" if auto else ""), user, procurement=proc)
-    notify([proc.buyer], f"Решение по закупке №{proc.number} утверждено — можно оформлять договоры", proc.get_absolute_url() + "?tab=contracts")
+    log("Все согласования получены → этап «Договор». Задача у отдела закупок" if not auto
+        else "Согласование не требуется по коридору → этап «Договор»", procurement=proc, kind="auto")
+    for memo in proc.memos:
+        log(f"Закупка №{proc.number} согласована → этап «Договор»", memo=memo, kind="auto")
+    notify([proc.buyer], f"Закупка №{proc.number} согласована — оформите договор", proc_card_url(proc))
 
 
 # ---------------------------------------------------------------- договоры (шаг 8)
@@ -866,7 +1015,7 @@ def _finish_contracting(proc, user):
     for line in proc.lines.filter(state=ProcurementLine.State.DONE).select_related("item__memo__initiator"):
         initiators.setdefault(line.item.memo.initiator_id, (line.item.memo.initiator, line.item.memo))
     for u, memo in initiators.values():
-        notify([u], f"По вашей {memo} заключены договоры (закупка №{proc.number})", memo.get_absolute_url())
+        notify([u], f"По вашей {memo} заключены договоры (закупка №{proc.number})", memo_card_url(memo))
     log("Договоры оформлены", user, procurement=proc)
 
 
@@ -935,13 +1084,14 @@ def _after_receipt(contract, touched_lines, user):
     if contract.lines.exists() and all(l.delivered_qty >= l.quantity for l in contract.lines.all()):
         contract.status = Contract.Status.EXECUTED
     contract.save(update_fields=["status"])
+    maybe_close_contract(contract)
     # Уведомление инициаторам только по их позициям.
     by_memo = defaultdict(list)
     for item in items.values():
         by_memo[item.memo].append(item)
     for memo, its in by_memo.items():
         parts = [f"{i.description} — {fmt_qty(i.delivered_qty)} из {fmt_qty(i.quantity)}" for i in its]
-        notify([memo.initiator], f"По вашей СЗ №{memo.number} поставлено: " + ", ".join(parts), memo.get_absolute_url())
+        notify([memo.initiator], f"По вашей СЗ №{memo.number} поставлено: " + ", ".join(parts), memo_card_url(memo))
         log("Поставлено: " + ", ".join(parts), user, memo=memo)
 
 
@@ -965,8 +1115,40 @@ def register_payment(contract, date, amount, doc_number, user=None):
         raise BusinessError("Сумма оплаты должна быть больше нуля.")
     if contract.status in (Contract.Status.DRAFT, Contract.Status.CANCELLED):
         raise BusinessError("Оплата по неподписанному/аннулированному договору невозможна.")
+    if contract.kind != Contract.Kind.FRAMEWORK and contract.amount and contract.paid_total + amount > contract.amount:
+        raise BusinessError(f"Оплата превысит сумму договора: остаток к оплате "
+                            f"{contract.amount - contract.paid_total:,.2f} ₸".replace(",", " "))
     Payment.objects.create(contract=contract, date=date, amount=amount, doc_number=doc_number)
-    log(f"Оплата {amount:,.2f} от {date:%d.%m.%Y} {doc_number}", user, contract=contract)
+    paid = contract.paid_total
+    pct = round(float(paid / contract.amount * 100)) if contract.amount else 0
+    text = f"оплата {amount:,.0f} ₸ проведена ({doc_number or 'б/н'}), оплачено {pct}%".replace(",", " ")
+    log(text, user, contract=contract, kind="" if user else "auto")
+    if contract.procurement_id:
+        log(f"Договор {contract.number}: {text}", procurement=contract.procurement, kind="auto")
+    if contract.status == Contract.Status.SIGNED:
+        contract.status = Contract.Status.EXECUTION
+        contract.save(update_fields=["status"])
+    maybe_close_contract(contract)
+
+
+def maybe_close_contract(contract):
+    """Договор закрывается, когда всё поставлено и полностью оплачено; закупка — когда закрыты все её договоры."""
+    contract.refresh_from_db()
+    if contract.kind == Contract.Kind.FRAMEWORK or contract.status in (Contract.Status.CLOSED, Contract.Status.CANCELLED):
+        return
+    lines = list(contract.lines.all())
+    delivered = lines and all(l.delivered_qty >= l.quantity for l in lines)
+    paid = contract.amount and contract.paid_total >= contract.amount
+    if delivered and paid:
+        contract.status = Contract.Status.CLOSED
+        contract.save(update_fields=["status"])
+        log("Поставлено и оплачено полностью → договор закрыт", contract=contract, kind="auto")
+        proc = contract.procurement
+        if proc and proc.status == P.CONTRACTS and not proc.contracts.exclude(
+                status__in=[Contract.Status.CLOSED, Contract.Status.CANCELLED]).exists():
+            proc.status = P.CLOSED
+            proc.save(update_fields=["status"])
+            log("Все договоры исполнены → закупка закрыта", procurement=proc, kind="auto")
 
 
 # ---------------------------------------------------------------- периодические задачи
@@ -988,6 +1170,27 @@ def run_periodic(now=None):
     for memo in Memo.objects.exclude(status_code__in=["done", "rejected", "draft"]):
         recalc_memo(memo)
 
+    # Просроченные согласования по коридору: напоминание согласующему, для красного коридора — эскалация гендиректору.
+    result["escalations"] = 0
+    for a in DecisionApproval.objects.filter(state=DecisionApproval.State.PENDING, due_at__lt=now,
+                                             procurement__decision_state=Procurement.DecisionState.ON_APPROVAL
+                                             ).select_related("procurement", "procurement__corridor"):
+        proc = a.procurement
+        key = f"overdue:{a.pk}:{now:%Y%m%d}"
+        if not ReminderLog.objects.filter(key=key).exists():
+            ReminderLog.objects.create(key=key)
+            notify(users_with_role(a.role), f"Напоминание: срок согласования закупки №{proc.number} истёк", proc_card_url(proc))
+            log(f"напоминание: срок {proc.corridor.sla_days if proc.corridor else ''} р.д. истёк, ждём "
+                f"{roles.SHORT.get(a.role, a.role)}", procurement=proc, kind="auto")
+            result["reminders"] += 1
+        if proc.corridor and proc.corridor.color == "r" and not a.escalated and a.role != roles.DIRECTOR:
+            a.escalated = True
+            a.save(update_fields=["escalated"])
+            notify(users_with_role(roles.DIRECTOR), f"Эскалация: {roles.SHORT.get(a.role, a.role)} не ответил в срок "
+                                                     f"по закупке №{proc.number}", proc_card_url(proc))
+            log(f"эскалация гендиректору: {roles.SHORT.get(a.role, a.role)} не ответил в срок", procurement=proc, kind="auto")
+            result["escalations"] += 1
+
     sla = now - timedelta(days=cfg("URGENT_SLA_DAYS"))
     buyers = list(users_with_role(roles.BUYER))
     for item in MemoItem.objects.filter(urgent=True, status_changed_at__lte=sla).exclude(
@@ -1001,6 +1204,6 @@ def run_periodic(now=None):
         targets = [active.procurement.buyer] if active else buyers
         days = (now - item.status_changed_at).days
         notify(targets, f"СРОЧНО: позиция {item.code} «{item.description}» без движения {days} дн. "
-                        f"(статус «{item.get_status_display()}»)", item.memo.get_absolute_url())
+                        f"(статус «{item.get_status_display()}»)", memo_card_url(item.memo))
         result["reminders"] += 1
     return result

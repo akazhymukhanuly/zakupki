@@ -85,3 +85,22 @@ def pct_class(v):
 @register.simple_tag
 def keyjoin(a, b):
     return f"{a}_{b}"
+
+
+@register.filter
+def get_item(seq, i):
+    try:
+        return seq[int(i)]
+    except (IndexError, ValueError, TypeError, KeyError):
+        return ""
+
+
+@register.filter
+def short_role(role):
+    from core.roles import SHORT
+    return SHORT.get(role, role)
+
+
+@register.filter
+def split_csv(value):
+    return [x.strip() for x in str(value).split(",") if x.strip()]

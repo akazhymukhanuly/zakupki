@@ -3,7 +3,7 @@ from django.contrib.auth.admin import UserAdmin
 from django.contrib.auth.models import User
 
 from .models import (
-    ApprovalRule, BudgetItem, Category, Contract, ContractLine, Department, Memo, MemoItem, MemoTemplate,
+    Attachment, BudgetItem, Corridor, Station, Category, Contract, ContractLine, Department, Memo, MemoItem, MemoTemplate,
     MemoTemplateLine, Nomenclature, Payment, Procurement, ProcurementLine, Profile, Receipt, ReceiptLine, Supplier,
 )
 
@@ -70,9 +70,19 @@ class SupplierAdmin(admin.ModelAdmin):
     search_fields = ["name", "bin"]
 
 
-@admin.register(ApprovalRule)
-class ApprovalRuleAdmin(admin.ModelAdmin):
-    list_display = ["min_amount", "role"]
+@admin.register(Corridor)
+class CorridorAdmin(admin.ModelAdmin):
+    list_display = ["name", "max_amount", "roles", "sla_days", "by_contract"]
+
+
+@admin.register(Station)
+class StationAdmin(admin.ModelAdmin):
+    list_display = ["name"]
+
+
+@admin.register(Attachment)
+class AttachmentAdmin(ReadOnlyAdmin):
+    list_display = ["name", "kind", "memo", "procurement", "contract", "uploaded_by", "created_at"]
 
 
 class TemplateLineInline(admin.TabularInline):
@@ -125,7 +135,12 @@ class ContractAdmin(ReadOnlyAdmin):
     inlines = [ContractLineInline]
 
 
-admin.site.register([BudgetItem, Category])
+admin.site.register([Category])
+
+
+@admin.register(BudgetItem)
+class BudgetItemAdmin(admin.ModelAdmin):
+    list_display = ["code", "name", "limit"]
 
 
 @admin.register(Payment)

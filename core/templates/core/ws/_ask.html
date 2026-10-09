@@ -1,0 +1,7 @@
+<details class="d-inline-block"><summary class="btn btn-sm btn-w">? {{ ask_label|default:"Вопрос" }}</summary>
+  <form method="post" action="{% url 'ws_ask' row.key %}" class="mt-2" style="min-width:300px">{% csrf_token %}
+    <input type="hidden" name="next" value="{{ request.get_full_path }}">
+    <textarea name="text" class="form-control form-control-sm mb-1" rows="2" placeholder="Вопрос (согласования других не сбрасываются)" required></textarea>
+    <button class="btn btn-sm btn-w">Отправить вопрос</button>
+  </form>
+</details>

@@ -1,0 +1,1 @@
+<div class="steps">{% for s in steps %}<div class="step {% if row.state %}{% if forloop.counter0 == row.stage %}bad{% elif forloop.counter0 < row.stage %}done{% endif %}{% elif row.stage == 6 or forloop.counter0 < row.stage %}done{% elif forloop.counter0 == row.stage %}cur{% endif %}"><span>{{ s }}</span></div>{% endfor %}</div>

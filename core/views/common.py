@@ -47,3 +47,17 @@ def paginate(request, qs, per_page=50):
     params = request.GET.copy()
     params.pop("page", None)
     return page, params.urlencode()
+
+
+def honor_next(view):
+    """После POST-действия вернуться туда, откуда пришли (?next= или поле next) — нужно для карточки на главном экране."""
+    from functools import wraps
+
+    @wraps(view)
+    def wrapper(request, *args, **kwargs):
+        resp = view(request, *args, **kwargs)
+        nxt = request.POST.get("next") if request.method == "POST" else None
+        if nxt and nxt.startswith("/") and not nxt.startswith("//") and getattr(resp, "status_code", 0) == 302:
+            return redirect(nxt)
+        return resp
+    return wrapper

@@ -1,0 +1,55 @@
+<div class="modal fade" id="newModal" tabindex="-1"><div class="modal-dialog modal-lg"><div class="modal-content">
+<form method="post" action="{% url 'ws_new_memo' %}" enctype="multipart/form-data" id="nf">{% csrf_token %}
+  {% if src_memo %}<input type="hidden" name="src" value="{{ src_memo.number }}">{% endif %}
+  <div class="modal-header"><h5 class="modal-title">{% if src_memo %}⟳ Повтор закупки СЗ-{{ src_memo.number }}{% else %}+ Новая потребность{% endif %}</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+  <div class="modal-body">
+    <div class="muted mb-3">Инициатор: <b>{{ user.get_full_name }}</b>{% if new_form.department %} · {{ new_form.department }}{% endif %}. Номер СЗ присвоится автоматически.</div>
+    <label class="form-label small">Название заявки (необязательно — если пусто, возьмём из первой позиции)</label>
+    <input name="name" class="form-control form-control-sm mb-3" value="{{ src_memo.title|default:'' }}" placeholder="Напр.: Комплектующие для ремонта насоса ПЭН-2">
+    <div class="small mb-1"><b>Позиции *</b> <span class="muted">— что нужно закупить. Цены не указываются: их определит отдел закупок.</span></div>
+    <datalist id="noms">{% for n in new_form.noms %}<option value="{{ n }}">{% endfor %}</datalist>
+    <div id="items">
+      {% if src_memo %}{% for i in src_memo.items.all %}
+      <div class="irow"><input name="item_name" class="form-control form-control-sm" list="noms" placeholder="Наименование *" value="{{ i.description }}">
+        <input name="item_qty" class="form-control form-control-sm" placeholder="Кол-во *" value="{{ i.quantity|stringformat:'s' }}" inputmode="decimal">
+        <select name="item_unit" class="form-select form-select-sm">{% for u in new_form.units %}<option {% if u == i.unit %}selected{% endif %}>{{ u }}</option>{% endfor %}{% if i.unit not in new_form.units %}<option selected>{{ i.unit }}</option>{% endif %}</select>
+        <input name="item_spec" class="form-control form-control-sm" placeholder="Марка / ГОСТ / характеристики" value="{{ i.spec }}">
+        <button type="button" class="btn btn-sm btn-l" onclick="delRow(this)">✕</button></div>
+      {% endfor %}{% else %}
+      <div class="irow"><input name="item_name" class="form-control form-control-sm" list="noms" placeholder="Наименование *">
+        <input name="item_qty" class="form-control form-control-sm" placeholder="Кол-во *" inputmode="decimal">
+        <select name="item_unit" class="form-select form-select-sm">{% for u in new_form.units %}<option>{{ u }}</option>{% endfor %}</select>
+        <input name="item_spec" class="form-control form-control-sm" placeholder="Марка / ГОСТ / характеристики">
+        <button type="button" class="btn btn-sm btn-l" onclick="delRow(this)">✕</button></div>
+      {% endif %}
+    </div>
+    <button type="button" class="btn btn-sm btn-l mb-3" onclick="addRow()">+ Добавить позицию</button>
+    <label class="form-label small">Зачем (обоснование)</label>
+    <textarea name="why" class="form-control form-control-sm mb-2" rows="2">{{ src_memo.justification|default:'' }}</textarea>
+    <div class="row g-2">
+      <div class="col-md-4"><label class="form-label small">Нужно к дате</label><input type="date" name="deliv" class="form-control form-control-sm" value="{{ new_form.default_date }}"></div>
+      <div class="col-md-4"><label class="form-label small">Статья бюджета</label><select name="budget" class="form-select form-select-sm"><option value="">—</option>{% for b in new_form.budgets %}<option value="{{ b.pk }}" {% if src_memo.budget_item_id == b.pk %}selected{% endif %}>{{ b.name }}</option>{% endfor %}</select></div>
+      <div class="col-md-4"><label class="form-label small">Категория</label><select name="cat" class="form-select form-select-sm"><option value="">—</option>{% for c in new_form.categories %}<option value="{{ c.pk }}" {% if src_memo.category_id == c.pk %}selected{% endif %}>{{ c }}</option>{% endfor %}</select></div>
+      <div class="col-md-4"><label class="form-label small">Станция</label><select name="station" class="form-select form-select-sm">{% for s in new_form.stations %}<option value="{{ s.pk }}" {% if new_form.station == s.pk %}selected{% endif %}>{{ s }}</option>{% endfor %}</select></div>
+      <div class="col-md-5"><label class="form-label small">Служебная записка (скан, необязательно)</label><input type="file" name="file" class="form-control form-control-sm"></div>
+      <div class="col-md-3 d-flex align-items-end"><div class="form-check"><input class="form-check-input" type="checkbox" name="urgent" id="urg"><label class="form-check-label small" for="urg">Срочно</label></div></div>
+    </div>
+    <div class="corr mt-3">ℹ️ После отправки СЗ уйдёт руководителю подразделения, затем — в отдел закупок. Закупщик подберёт поставщика и цены, и только тогда система определит коридор и согласующих.</div>
+  </div>
+  <div class="modal-footer">
+    <button type="button" class="btn btn-l" data-bs-dismiss="modal">Отмена</button>
+    <button class="btn btn-l" name="draft" value="1">Сохранить черновик</button>
+    <button class="btn btn-g" name="send" value="1">Отправить</button>
+  </div>
+</form>
+</div></div></div>
+<script>
+function addRow() {
+  const box = document.getElementById('items'), row = box.firstElementChild.cloneNode(true);
+  row.querySelectorAll('input').forEach(i => i.value = ''); box.appendChild(row); row.querySelector('input').focus();
+}
+function delRow(b) {
+  const box = document.getElementById('items');
+  if (box.children.length > 1) b.parentElement.remove(); else b.parentElement.querySelectorAll('input').forEach(i => i.value = '');
+}
+</script>

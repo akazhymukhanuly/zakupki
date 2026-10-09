@@ -21,4 +21,16 @@ def nav(request):
         "my_roles": sorted(roles.user_roles(user)),
         "unread_count": user.notifications.filter(is_read=False).count(),
         "demo_mode": settings.DEMO_MODE,
+        "help_corridors": _corridors,
+        "demo_users": _demo_users() if settings.DEMO_MODE else [],
     }
+
+
+def _demo_users():
+    from .views.workspace import demo_users
+    return demo_users()
+
+
+def _corridors():
+    from .models import Corridor
+    return list(Corridor.objects.all())

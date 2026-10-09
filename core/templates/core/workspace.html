@@ -1,0 +1,113 @@
+{% extends "core/base.html" %}{% load static core_tags %}
+{% block title %}Реестр{% endblock %}
+{% block head %}<link href="{% static 'core/ws.css' %}" rel="stylesheet">{% endblock %}
+{% block container_class %}content-ws{% endblock %}
+{% block content %}
+<div class="ws-top">
+  {% if kpis %}
+  <div class="kpi-strip">
+    {% for k, label, value, sub in kpis %}
+    <div class="kpi-tile kpi-{{ k }}"><span class="kpi-label">{{ label }}</span><span class="kpi-value">{{ value }}</span><span class="kpi-sub" title="{{ sub }}">{{ sub }}</span></div>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% if analytics %}
+  <div class="gres-analytics">
+    <div class="analytics-grid">
+      {% for a in analytics %}
+      <a class="analytics-card" href="?station={{ a.station.pk }}&f=all">
+        <span><span class="analytics-station">{{ a.station }}</span><br><span class="analytics-value">{{ a.total }}</span></span>
+        <span class="mini-bar" title="оплачено {{ a.paid_pct }}%"><i style="width:{{ a.paid_pct }}%"></i></span>
+        <span class="analytics-sub">оплачено {{ a.paid_pct }}% · в работе {{ a.active }}</span>
+      </a>
+      {% endfor %}
+    </div>
+    <div class="stages-line">{% for s, n in stage_counts %}<span>{{ s }}: <b>{{ n }}</b></span>{% endfor %}<span class="ms-auto">в текущем списке</span></div>
+  </div>
+  {% endif %}
+</div>
+
+<div class="ws-main">
+  <section class="ws-panel">
+    <div class="ws-toolbar">
+      {% for code, label in chips %}<a class="chip {% if f == code %}on{% endif %}" href="?f={{ code }}{% if q %}&q={{ q|urlencode }}{% endif %}{% if station %}&station={{ station }}{% endif %}">{{ label }}{% if code == 'my' %}<span class="n">{{ task_count }}</span>{% endif %}</a>{% endfor %}
+      <form method="get" class="d-inline">
+        <input type="hidden" name="f" value="{{ f }}">{% if q %}<input type="hidden" name="q" value="{{ q }}">{% endif %}
+        <select name="station" class="form-select form-select-sm d-inline-block" style="width:auto" onchange="this.form.submit()">
+          <option value="">Все станции</option>
+          {% for s in stations %}<option value="{{ s.pk }}" {% if station == s.pk|stringformat:"s" %}selected{% endif %}>{{ s }}</option>{% endfor %}
+        </select>
+      </form>
+      <span class="right">
+        {% if green_count %}
+        <form method="post" action="{% url 'ws_approve_green' %}" class="m-0" data-confirm="Согласовать все закупки зелёного коридора, которые ждут вас ({{ green_count }})?">{% csrf_token %}
+          <button class="btn btn-sm btn-g">✓ Согласовать все зелёные ({{ green_count }})</button></form>
+        {% endif %}
+        {% if perm.memo_create %}<button class="btn btn-sm btn-l" type="button" data-bs-toggle="modal" data-bs-target="#newModal">+ Новая потребность</button>{% endif %}
+        <a class="btn btn-sm btn-l" href="{% url 'ws_export' %}?{{ base_qs }}">⬇ Excel</a>
+      </span>
+    </div>
+    {% if director %}
+    <div class="director-overview"><div class="director-tabs">
+      {% for code, label, n, hint in director %}
+      <a class="director-tile {% if f == code %}selected{% endif %}" href="?f={{ code }}"><span class="muted">{{ label }}</span><strong>{{ n }}</strong><span class="muted">{{ hint }}</span></a>
+      {% endfor %}
+    </div></div>
+    {% endif %}
+    {% if pool_count and f == 'my' %}
+    <a class="tasks-hint" href="{% url 'pool' %}">📥 В пуле {{ pool_count }} поз. ждут расценки — собрать в закупку →</a>
+    {% endif %}
+    {% if q %}<div class="tasks-hint" style="cursor:default">Поиск «{{ q }}»: найдено {{ rows|length }}. <a href="?f={{ f }}">сбросить</a></div>{% endif %}
+    <div class="table-responsive">
+    <table class="ws-table">
+      <thead><tr><th>№</th><th>Что закупаем</th><th>Инициатор / СЗ</th><th>Сумма</th><th class="c-sup">Поставщик</th><th>Этап</th><th>Ждёт</th><th></th></tr></thead>
+      <tbody>
+      {% for r in rows %}
+      <tr class="wsrow {% if sel == r.key %}sel{% endif %}" onclick="location='?sel={{ r.key }}{% if base_qs %}&{{ base_qs }}{% endif %}'">
+        <td class="text-nowrap"><span class="dot {{ r.dot }}"></span>{{ r.number }}<span class="kind">{% if r.kind == 'memo' %}СЗ{% elif r.kind == 'proc' %}ЗАКУПКА{% else %}ДОГОВОР{% endif %}</span></td>
+        <td class="t-title"><div>{{ r.title }}</div><div class="muted">{{ r.sub }}{% if r.station != '—' %} · {{ r.station }}{% endif %}</div></td>
+        <td>{{ r.who }}<div class="muted">{{ r.who_sub }}</div></td>
+        <td class="text-nowrap">
+          {% if r.kind == 'contract' and r.amount %}
+            <div class="pay"><div class="pay-cap"><b>{{ r.amount|money0 }} ₸</b><span>{{ r.paid_pct }}%</span></div>
+              <div class="pay-track"><div class="pay-fill {% if r.paid_pct == 100 %}complete{% endif %}" style="width:{{ r.paid_pct }}%"></div></div></div>
+          {% elif not sees_prices %}<span class="muted">🔒 скрыта</span>
+          {% elif r.amount is None %}<span class="muted">ожидает расценки</span>
+          {% else %}<b>{{ r.amount|money0 }} ₸</b>{% endif %}
+        </td>
+        <td class="c-sup">{{ r.supplier }}</td>
+        <td>{% if r.state == 'rejected' %}<span class="sbadge rej">Отклонено</span>{% elif r.state == 'cancelled' %}<span class="sbadge rej">Отменено</span>{% else %}<span class="sbadge s{{ r.stage }}">{{ steps|get_item:r.stage }}</span>{% endif %}{% if r.question %} <span class="sbadge q">вопрос</span>{% endif %}</td>
+        <td>{% if r.done %}—{% else %}{% if r.wait_days is not None %}<span class="{% if r.late %}late{% endif %}">{{ r.wait_days }} дн.</span>{% endif %}<div class="muted">{{ r.wait_who }}</div>{% endif %}</td>
+        <td class="act">{% if r.task %}<a class="btn task-btn {% if r.task_code == 'approve' or r.task_code == 'approve_memo' %}btn-g{% elif r.task_code == 'answer' or r.task_code == 'analog' %}btn-w{% else %}btn-b{% endif %}" href="?sel={{ r.key }}{% if base_qs %}&{{ base_qs }}{% endif %}" onclick="event.stopPropagation()">{{ r.task }}</a>{% endif %}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="8" class="ws-empty">
+        {% if f == 'my' %}🎉 Задач нет. Всё, что ждёт именно вас, появится здесь.<div class="mt-2"><a class="chip" href="?f=all">Показать все</a></div>
+        {% else %}Ничего не найдено{% endif %}
+      </td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </section>
+
+  <div class="ws-card-wrap">
+  <aside class="ws-panel ws-card" id="card">
+    {% if card %}
+      {% if card.kind == 'memo' %}{% include "core/ws/card_memo.html" %}
+      {% elif card.kind == 'proc' %}{% include "core/ws/card_proc.html" %}
+      {% else %}{% include "core/ws/card_contract.html" %}{% endif %}
+    {% else %}
+      <div class="ws-empty">Выберите строку в реестре —<br>карточка откроется здесь</div>
+    {% endif %}
+  </aside>
+  </div>
+</div>
+
+{% if perm.memo_create %}{% include "core/ws/new_modal.html" %}{% endif %}
+{% endblock %}
+{% block scripts %}
+<script>
+{% if open_new or src_memo %}new bootstrap.Modal(document.getElementById('newModal')).show();{% endif %}
+</script>
+{% endblock %}

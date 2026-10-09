@@ -1,0 +1,69 @@
+{% load core_tags %}{% with row=card.row c=card.c %}
+<h2><span class="dot {{ row.dot }}"></span>{{ c }} · {{ c.supplier.name }}</h2>
+<div class="muted">{{ c.get_kind_display }}{% if c.parent %} к {{ c.parent.number }}{% endif %} · от {{ c.date|date:"d.m.Y" }}
+  {% if c.procurement %} · <a href="?sel=p{{ c.procurement.pk }}&f=all">закупка №{{ c.procurement.number }}</a>{% endif %}</div>
+{% include "core/ws/_steps.html" %}
+
+<div class="next-step {% if row.task %}mine{% endif %}">
+  <span class="next-step-stage">{{ c.get_status_display }}</span>
+  {% if row.task %}<b class="ms-1">Ваша задача: {{ row.task|lower }}</b>{% endif %}
+  <div class="next-step-text">
+    {% if c.status == 'draft' or c.status == 'signing' %}Подпишите договор и прикрепите скан. После подписания он уходит в 1С, и запускается исполнение.
+    {% elif c.status == 'cancelled' %}Договор аннулирован, позиции вернулись в пул.
+    {% elif c.status == 'closed' %}Поставлено и оплачено полностью — договор закрыт.
+    {% else %}Исполнение: поставки приходят из 1С построчно, оплаты — траншами.{% endif %}
+  </div>
+  <div class="cardact">
+    {% if card.manage %}{% for s in card.flow %}
+    <form method="post" action="{% url 'contract_action' c.pk 'status' %}" class="m-0" {% if s == 'cancelled' %}data-confirm="Аннулировать договор? Позиции вернутся в пул."{% endif %}>{% csrf_token %}
+      <input type="hidden" name="next" value="{{ request.get_full_path }}"><input type="hidden" name="status" value="{{ s }}">
+      <button class="btn btn-sm {% if s == 'cancelled' %}btn-r{% elif s == 'draft' %}btn-l{% else %}btn-b{% endif %}">{% if s == 'signed' %}📄 {% endif %}→ {{ card.status_labels|get:s }}</button></form>
+    {% endfor %}{% endif %}
+  </div>
+</div>
+
+{% if c.kind != 'framework' and c.amount %}
+<div class="finance">
+  <div class="sect mt-0">Оплата</div>
+  <div class="pay-cap"><span>оплачено <b>{{ c.paid_total|money0 }} ₸</b> из {{ c.amount|money0 }} ₸</span><span>{{ row.paid_pct }}%</span></div>
+  <div class="pay-track mb-2"><div class="pay-fill {% if row.paid_pct == 100 %}complete{% endif %}" style="width:{{ row.paid_pct }}%"></div></div>
+  {% if card.payments %}
+  <table class="it mb-2"><thead><tr><th>Дата</th><th>Документ</th><th class="num">Сумма</th></tr></thead><tbody>
+    {% for p in card.payments %}<tr><td>{{ p.date|date:"d.m.Y" }}</td><td>{{ p.doc_number|default:"—" }}</td><td class="num">{{ p.amount|money0 }}</td></tr>{% endfor %}
+  </tbody></table>
+  {% endif %}
+  {% if card.finance and card.rest and c.status != 'draft' and c.status != 'cancelled' and c.status != 'closed' %}
+  <form method="post" action="{% url 'contract_action' c.pk 'payment' %}" class="row g-2 align-items-end">{% csrf_token %}
+    <input type="hidden" name="next" value="{{ request.get_full_path }}">
+    <div class="col-12 d-flex gap-1 flex-wrap"><span class="muted me-1">Быстро:</span>
+      {% for pct in "30,50,100"|split_csv %}<button type="button" class="btn btn-sm btn-l py-0" onclick="this.form.amount.value=(Math.min({{ card.rest|stringformat:'s' }}, {{ c.amount|stringformat:'s' }}*{{ pct }}/100)).toFixed(2)">{{ pct }}%</button>{% endfor %}
+      <button type="button" class="btn btn-sm btn-l py-0" onclick="this.form.amount.value='{{ card.rest|stringformat:'s' }}'">остаток</button></div>
+    <div class="col-4"><input type="date" name="date" class="form-control form-control-sm" value="{{ card.today|date:'Y-m-d' }}"></div>
+    <div class="col-4"><input name="amount" class="form-control form-control-sm" placeholder="Сумма, ₸" required></div>
+    <div class="col-4"><input name="doc" class="form-control form-control-sm" placeholder="№ п/п"></div>
+    <div class="col-12"><button class="btn btn-sm btn-b">₸ Провести оплату</button> <span class="muted">в боевом режиме оплаты приходят из 1С</span></div>
+  </form>
+  {% endif %}
+</div>
+{% endif %}
+
+<div class="kv">
+  <b>Поставщик</b><span>{{ c.supplier.name }}{% if c.supplier.bin %} <span class="muted">БИН {{ c.supplier.bin }}</span>{% endif %}</span>
+  <b>Сумма</b><span><b>{{ c.amount|money0 }} ₸</b></span>
+  <b>Поставлено</b><span>{{ c.delivered_percent }}%</span>
+  <b>СЗ</b><span>{% for m in c.memos %}<a href="?sel=m{{ m.pk }}&f=all">СЗ-{{ m.number }}</a>{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}</span>
+  {% if c.exported_1c_at %}<b>1С</b><span>выгружен {{ c.exported_1c_at|date:"d.m.Y H:i" }}</span>{% endif %}
+</div>
+{% include "core/ws/_files.html" %}
+
+<div class="sect">Спецификация</div>
+<table class="it">
+  <thead><tr><th>Позиция</th><th class="num">Кол-во</th><th class="num">Цена</th><th class="num">Поставлено</th></tr></thead>
+  <tbody>{% for l in card.lines %}
+  <tr><td>{{ l.description }}<div class="muted">{{ l.item.code }}</div></td><td class="num">{{ l.quantity|qty }} {{ l.unit }}</td>
+    <td class="num">{{ l.price|money0 }}</td><td class="num">{{ l.delivered_qty|qty }}</td></tr>
+  {% endfor %}</tbody>
+</table>
+<div class="cardact mt-3"><a class="btn btn-sm btn-l" href="{% url 'contract_detail' c.pk %}">Открыть полностью (поступления, 1С)</a></div>
+{% include "core/ws/_feed.html" %}
+{% endwith %}

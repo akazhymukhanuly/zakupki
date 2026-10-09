@@ -1,8 +1,8 @@
 """Загрузка справочников заказчика из одного Excel-файла (шаблон: manage.py import_refs --template).
 
 Листы (порядок важен — ссылки идут на предыдущие листы):
-  Подразделения, Пользователи, Статьи бюджета, Категории, Номенклатура, Поставщики,
-  Рамочные договоры, Пороги согласования.
+  Станции, Подразделения, Пользователи, Статьи бюджета, Категории, Номенклатура, Поставщики,
+  Рамочные договоры, Коридоры согласования.
 
 Повторная загрузка безопасна: записи обновляются по ключу (код / логин / БИН / наименование),
 новые — добавляются, ничего не удаляется. Режим проверки (dry_run) ничего не записывает.
@@ -21,11 +21,14 @@ from openpyxl.styles import Font, PatternFill
 
 from . import roles
 from .models import (
-    ApprovalRule, BudgetItem, Category, Contract, Department, Nomenclature, Profile, Supplier,
+    BudgetItem, Category, Contract, Corridor, Department, Nomenclature, Profile, Station, Supplier,
 )
 
 # Лист → [(колонка, обязательна, пояснение, пример)]
 SHEETS = {
+    "Станции": [
+        ("Наименование", True, "Станции/филиалы", "ГРЭС-1"),
+    ],
     "Подразделения": [
         ("Наименование", True, "Уникальное название", "IT-отдел"),
         ("Руководитель (логин)", False, "Согласует СЗ подразделения. Логин с листа «Пользователи»", "saparova"),
@@ -36,12 +39,14 @@ SHEETS = {
         ("Имя", True, "", "Иван"),
         ("E-mail", False, "Для уведомлений", "ivanov@company.kz"),
         ("Подразделение", False, "Точно как на листе «Подразделения»", "IT-отдел"),
-        ("Должность", False, "", "Системный администратор"),
+        ("Должность", False, "", "Инженер КТЦ"),
+        ("Станция", False, "Как на листе «Станции»", "ГРЭС-1"),
         ("Роли", True, "Через запятую: " + ", ".join(roles.ALL_ROLES), "Инициатор"),
     ],
     "Статьи бюджета": [
         ("Код", True, "Как в бюджете / 1С", "01.01"),
-        ("Наименование", True, "", "Канцелярские расходы"),
+        ("Наименование", True, "", "Ремонт основного оборудования"),
+        ("Лимит на год", False, "Для показа остатка по статье, ₸", "250000000"),
     ],
     "Категории": [
         ("Наименование", True, "Группа закупок; по ней подбираются поставщики", "Канцтовары"),
@@ -67,9 +72,13 @@ SHEETS = {
         ("Поставщик (БИН или наименование)", True, "", "180540012345"),
         ("Действует до", False, "ДД.ММ.ГГГГ", "31.12.2026"),
     ],
-    "Пороги согласования": [
-        ("Сумма от", True, "Сумма решения по закупке, ₸", "1000000"),
-        ("Роль", True, "Директор / Финдиректор", "Директор"),
+    "Коридоры согласования": [
+        ("Код", True, "g / y / r / simple", "g"),
+        ("Название", True, "", "Зелёный"),
+        ("Сумма до", False, "Верхняя граница, ₸. Пусто — без границы", "5000000"),
+        ("Согласующие роли", True, "Через запятую, названия ролей", "Главный инженер"),
+        ("Срок, р.д.", True, "Рабочих дней", "1"),
+        ("По действующему договору", False, "да — упрощённый круг для закупок по договору", ""),
     ],
 }
 
@@ -218,6 +227,13 @@ def _import(wb, report):
         Group.objects.get_or_create(name=group)
     heads = []
 
+    sheet = "Станции"
+    for n, r in _rows(wb, sheet):
+        if not _required(r, SHEETS[sheet], report, sheet, n):
+            continue
+        _, created = Station.objects.get_or_create(name=_norm(r["Наименование"]))
+        report.add(sheet, created)
+
     sheet = "Подразделения"
     for n, r in _rows(wb, sheet):
         if not _required(r, SHEETS[sheet], report, sheet, n):
@@ -256,7 +272,14 @@ def _import(wb, report):
             report.passwords.append((login, password))
         user.save()
         user.groups.set(Group.objects.filter(name__in=role_names))
-        Profile.objects.update_or_create(user=user, defaults={"department": dept, "position": _norm(r.get("Должность"))})
+        station = None
+        if _norm(r.get("Станция")):
+            station = Station.objects.filter(name=_norm(r["Станция"])).first()
+            if not station:
+                report.error(sheet, n, f"станция «{_norm(r['Станция'])}» не найдена")
+                continue
+        Profile.objects.update_or_create(user=user, defaults={
+            "department": dept, "position": _norm(r.get("Должность")), "station": station})
         report.add(sheet, created)
 
     for n, dept, login in heads:
@@ -271,7 +294,13 @@ def _import(wb, report):
     for n, r in _rows(wb, sheet):
         if not _required(r, SHEETS[sheet], report, sheet, n):
             continue
-        _, created = BudgetItem.objects.update_or_create(code=_norm(r["Код"]), defaults={"name": _norm(r["Наименование"])})
+        try:
+            limit = _decimal(r["Лимит на год"]) if _norm(r.get("Лимит на год")) else None
+        except ValueError as e:
+            report.error(sheet, n, str(e))
+            continue
+        _, created = BudgetItem.objects.update_or_create(code=_norm(r["Код"]), defaults={
+            "name": _norm(r["Наименование"]), "limit": limit})
         report.add(sheet, created)
 
     sheet = "Категории"
@@ -345,18 +374,25 @@ def _import(wb, report):
         )
         report.add(sheet, created)
 
-    sheet = "Пороги согласования"
+    sheet = "Коридоры согласования"
     for n, r in _rows(wb, sheet):
         if not _required(r, SHEETS[sheet], report, sheet, n):
             continue
-        role = _norm(r["Роль"])
-        if role not in roles.ALL_ROLES:
-            report.error(sheet, n, f"неизвестная роль «{role}»")
+        role_list = [x.strip() for x in re.split(r"[,;]", _norm(r["Согласующие роли"])) if x.strip()]
+        bad = [x for x in role_list if x not in roles.ALL_ROLES]
+        if bad:
+            report.error(sheet, n, f"неизвестные роли: {', '.join(bad)}")
             continue
         try:
-            amount = _decimal(r["Сумма от"])
+            max_amount = _decimal(r["Сумма до"]) if _norm(r.get("Сумма до")) else None
+            sla = int(_decimal(r["Срок, р.д."]))
         except ValueError as e:
             report.error(sheet, n, str(e))
             continue
-        _, created = ApprovalRule.objects.get_or_create(min_amount=amount, role=role)
+        code = _norm(r["Код"]).lower()
+        _, created = Corridor.objects.update_or_create(code=code, defaults={
+            "name": _norm(r["Название"]), "max_amount": max_amount, "roles": ", ".join(role_list), "sla_days": sla,
+            "color": code[:1] if code[:1] in "gyr" else "b",
+            "by_contract": _norm(r.get("По действующему договору")).lower() in ("да", "yes", "1", "+"),
+        })
         report.add(sheet, created)

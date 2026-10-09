@@ -14,7 +14,7 @@ from django.utils import timezone
 
 from . import onec, roles, services
 from .models import (
-    RFQ, ApprovalRule, Contract, DecisionLine, Department, Memo, MemoItem, Nomenclature, Procurement, ProcurementLine,
+    RFQ, Contract, Corridor, DecisionApproval, Station, DecisionLine, Department, Memo, MemoItem, Nomenclature, Procurement, ProcurementLine,
     ReceiptLine, Supplier, WithdrawalRequest,
 )
 
@@ -30,12 +30,17 @@ class Base(TestCase):
         self.head = self.mk("head", roles.APPROVER)
         self.buyer = self.mk("buyer", roles.BUYER)
         self.director = self.mk("dir", roles.DIRECTOR)
+        self.chief = self.mk("chief", roles.CHIEF)
+        self.cfo = self.mk("cfo", roles.CFO)
+        self.lawyer = self.mk("lawyer", roles.LAWYER)
+        self.pto = self.mk("pto", roles.PTO)
+        self.by_role = {roles.CHIEF: self.chief, roles.CFO: self.cfo, roles.BUYER: self.buyer,
+                        roles.LAWYER: self.lawyer, roles.DIRECTOR: self.director, roles.PTO: self.pto}
         self.dept = Department.objects.create(name="Отдел", head=self.head)
         self.paper = Nomenclature.objects.create(name="Бумага А4", unit="пач", code_1c="P1")
         self.pens = Nomenclature.objects.create(name="Ручки", unit="уп", code_1c="P2")
         self.s1 = Supplier.objects.create(name="Поставщик 1")
         self.s2 = Supplier.objects.create(name="Поставщик 2")
-        ApprovalRule.objects.create(min_amount=D("1000000"), role=roles.DIRECTOR)
 
     def mk(self, name, role):
         u = User.objects.create_user(name, password="x", first_name=name)
@@ -64,6 +69,15 @@ class Base(TestCase):
                                  "offered_qty": (offered or {}).get(nom),
                                  "is_analog": bool((analog or {}).get(nom)), "analog_description": (analog or {}).get(nom, "")}
         return services.save_quote(rfq, {}, rows, self.buyer)
+
+    def approve_all(self, proc):
+        """Согласовать решение всеми ролями коридора."""
+        for a in proc.approvals.filter(state="pending"):
+            services.resolve_decision_approval(a, self.by_role[a.role], True)
+
+    def submit_and_approve(self, proc):
+        services.submit_decision(proc, self.buyer)
+        self.approve_all(proc)
 
     def refresh(self, *objs):
         for o in objs:
@@ -126,7 +140,7 @@ class ProcurementFlowTests(Base):
         services.decision_preset(proc, "best", self.buyer)
         pens_line = proc.lines.get(item__nomenclature=self.pens)
         self.assertEqual(pens_line.decision_lines.get().quantity, D(6))  # поставщик даёт только 6 из 10
-        services.submit_decision(proc, self.buyer)  # < порога → утверждено сразу
+        self.submit_and_approve(proc)
         self.refresh(proc)
         self.assertEqual(proc.decision_state, Procurement.DecisionState.APPROVED)
         pens_item = pens_line.item
@@ -170,7 +184,7 @@ class ProcurementFlowTests(Base):
             services.set_decision(proc, [(line, ql1, D(60)), (line, ql2, D(60))], self.buyer)
         services.set_decision(proc, [(line, ql1, D(60)), (line, ql2, D(60))], self.buyer, allow_over=True)
         services.set_decision(proc, [(line, ql1, D(40)), (line, ql2, D(60))], self.buyer)
-        services.submit_decision(proc, self.buyer)
+        self.submit_and_approve(proc)
         contracts = services.create_contracts(proc, self.buyer, {})
         self.assertEqual(len(contracts), 2)
         item = m.items.get()
@@ -190,13 +204,15 @@ class ProcurementFlowTests(Base):
         with self.assertRaises(services.BusinessError):
             services.confirm_analog(d, self.initiator2, True)  # не инициатор
         services.confirm_analog(d, self.initiator, True)
-        services.submit_decision(proc, self.buyer)  # 2 000 000 ≥ 1 000 000 → директор
+        services.submit_decision(proc, self.buyer)  # 2 000 000 ₸ → зелёный коридор → главный инженер
         self.refresh(proc)
         self.assertEqual(proc.decision_state, Procurement.DecisionState.ON_APPROVAL)
+        self.assertEqual(proc.corridor.code, "g")
         approval = proc.approvals.get()
+        self.assertEqual(approval.role, roles.CHIEF)
         with self.assertRaises(services.BusinessError):
             services.resolve_decision_approval(approval, self.buyer, True)
-        services.resolve_decision_approval(approval, self.director, True)
+        services.resolve_decision_approval(approval, self.chief, True)
         self.refresh(proc)
         self.assertEqual(proc.decision_state, Procurement.DecisionState.APPROVED)
         (c,) = services.create_contracts(proc, self.buyer, {})
@@ -208,7 +224,7 @@ class ProcurementFlowTests(Base):
         services.add_rfqs(proc, [self.s1], self.buyer)
         self.quote(proc, self.s1, {self.paper: 100, self.pens: None})
         services.decision_preset(proc, "best", self.buyer)
-        services.submit_decision(proc, self.buyer)
+        self.submit_and_approve(proc)
         pens = m.items.get(nomenclature=self.pens)
         self.assertEqual(pens.status, S.APPROVED)
         self.assertIn(pens, services.pool_items())
@@ -218,6 +234,96 @@ class ProcurementFlowTests(Base):
         pens.refresh_from_db()
         self.assertEqual(pens.status, S.APPROVED)
         self.assertIn("отменена", pens.pool_note)
+
+
+class CorridorTests(Base):
+    """Коридоры согласования из макета ГРЭС."""
+
+    def priced(self, price, qty=1, method=Procurement.Method.SINGLE):
+        m = self.memo(self.initiator, [(self.paper, qty)])
+        proc = services.create_procurement(self.buyer, list(m.items.all()), "Т", method)
+        services.quick_price(proc, self.s1, {proc.lines.get().pk: D(price)}, self.buyer)
+        proc.refresh_from_db()
+        return proc
+
+    def test_corridor_by_amount_and_parallel_roles(self):
+        g = self.priced(5_000_000)
+        self.assertEqual((g.corridor.code, [a.role for a in g.approvals.all()]), ("g", [roles.CHIEF]))
+        y = self.priced(27_500_000)
+        self.assertEqual(y.corridor.code, "y")
+        self.assertEqual({a.role for a in y.approvals.all()}, {roles.CHIEF, roles.CFO, roles.BUYER})
+        r = self.priced(1_850_000_000)
+        self.assertEqual(r.corridor.code, "r")
+        self.assertEqual(r.approvals.count(), 5)
+        simple = self.priced(960_000_000, method=Procurement.Method.CONTRACT)
+        self.assertEqual({a.role for a in simple.approvals.all()}, {roles.PTO, roles.CFO})
+        # Срок — рабочие дни: не раньше чем через 1 день и всегда в будни.
+        self.assertGreater(g.approvals.get().due_at, timezone.now())
+        self.assertLess(g.approvals.get().due_at.weekday(), 5)
+
+    def test_question_does_not_reset_and_reject_needs_reason(self):
+        y = self.priced(27_500_000)
+        services.resolve_decision_approval(y.approvals.get(role=roles.CFO), self.cfo, True)
+        q = services.ask_question(self.chief, "Почему не Темир-Хим?", procurement=y)
+        self.assertEqual(y.approvals.filter(state="approved").count(), 1)  # согласование финансов не сброшено
+        with self.assertRaises(services.BusinessError):
+            services.answer_question(q, self.initiator2, "не я")
+        services.answer_question(q, self.buyer, "нет лицензии")
+        q.refresh_from_db()
+        self.assertFalse(q.is_open)
+        with self.assertRaises(services.BusinessError):
+            services.resolve_decision_approval(y.approvals.get(role=roles.CHIEF), self.chief, False, "")
+        services.resolve_decision_approval(y.approvals.get(role=roles.CHIEF), self.chief, False, "дорого")
+        y.refresh_from_db()
+        self.assertEqual(y.decision_state, Procurement.DecisionState.REJECTED)
+
+    def test_bulk_green_and_escalation(self):
+        g1, g2, y = self.priced(1_000_000), self.priced(2_000_000), self.priced(10_000_000)
+        self.assertEqual(services.approve_all_green(self.chief), 2)
+        for p in (g1, g2):
+            p.refresh_from_db()
+            self.assertEqual(p.decision_state, Procurement.DecisionState.APPROVED)
+        y.refresh_from_db()
+        self.assertEqual(y.decision_state, Procurement.DecisionState.ON_APPROVAL)  # жёлтый массово не согласуется
+        r = self.priced(100_000_000)
+        DecisionApproval.objects.filter(procurement=r).update(due_at=timezone.now() - timedelta(days=1))
+        res = services.run_periodic()
+        self.assertGreaterEqual(res["escalations"], 1)
+        self.assertTrue(self.director.notifications.filter(text__startswith="Эскалация").exists())
+
+    def test_quick_price_only_for_single_source(self):
+        m = self.memo(self.initiator, [(self.paper, 1)])
+        proc = services.create_procurement(self.buyer, list(m.items.all()), "Т", Procurement.Method.RFQ)
+        with self.assertRaises(services.BusinessError):
+            services.quick_price(proc, self.s1, {proc.lines.get().pk: D(100)}, self.buyer)
+
+    def test_initiator_does_not_see_prices(self):
+        g = self.priced(3_000_000)
+        memo = Memo.objects.get(items__procurement_lines__procurement=g)
+        self.assertFalse(roles.sees_prices(self.initiator))
+        self.client.force_login(self.initiator)
+        html = self.client.get(f"/?f=all&sel=m{memo.pk}").content.decode()
+        self.assertNotIn("3 000 000", html.replace("\xa0", " "))
+        self.assertIn("скрыта", html)
+        self.client.force_login(self.chief)
+        html = self.client.get(f"/?f=all&sel=p{g.pk}").content.decode().replace("\xa0", " ")
+        self.assertIn("3 000 000", html)
+
+    def test_payment_tranches_and_auto_close(self):
+        g = self.priced(1_000, qty=10)
+        self.approve_all(g)
+        (c,) = services.create_contracts(g, self.buyer, {})
+        services.set_contract_status(c, Contract.Status.SIGNING, self.buyer)
+        services.set_contract_status(c, Contract.Status.SIGNED, self.buyer)
+        services.register_payment(c, timezone.localdate(), D(3000), "ПП-1", self.cfo)
+        with self.assertRaises(services.BusinessError):
+            services.register_payment(c, timezone.localdate(), D(8000), "ПП-2", self.cfo)  # больше остатка
+        services.register_payment(c, timezone.localdate(), D(7000), "ПП-2", self.cfo)
+        services.register_receipt(c, timezone.localdate(), "ПТУ", [(c.lines.get(), D(10), ReceiptLine.Match.ID, True, "", "")])
+        c.refresh_from_db()
+        g.refresh_from_db()
+        self.assertEqual(c.status, Contract.Status.CLOSED)
+        self.assertEqual(g.status, Procurement.Status.CLOSED)
 
 
 class WithdrawalTests(Base):
@@ -247,7 +353,7 @@ class WithdrawalTests(Base):
         services.add_rfqs(proc, [self.s1], self.buyer)
         self.quote(proc, self.s1, {self.paper: 100})
         services.decision_preset(proc, "best", self.buyer)
-        services.submit_decision(proc, self.buyer)
+        self.submit_and_approve(proc)
         services.create_contracts(proc, self.buyer, {})
         with self.assertRaises(services.BusinessError):
             services.withdraw_item(item, self.initiator, "поздно")
@@ -261,7 +367,7 @@ class OneCTests(Base):
         services.add_rfqs(proc, [self.s1], self.buyer)
         self.quote(proc, self.s1, {self.paper: 100, self.pens: 50})
         services.decision_preset(proc, "best", self.buyer)
-        services.submit_decision(proc, self.buyer)
+        self.submit_and_approve(proc)
         (c,) = services.create_contracts(proc, self.buyer, {})
         c.number = "Д-1"
         c.save()
@@ -333,7 +439,10 @@ class SmokeTests(TestCase):
             urls.append(reverse("comparison_export", args=[p.pk]))
         for c in C.objects.all():
             urls += [c.get_absolute_url() + f"?tab={t}" for t in ["spec", "receipts", "payments", "history", "specs"]]
-        for username in ["ivanov", "petrova", "head", "buyer", "director", "cfo", "accountant", "admin"]:
+        urls += ["/?f=all&sel=" + k for k in [f"m{m.pk}" for m in Memo.objects.all()] + [f"p{p.pk}" for p in P.objects.all()]]
+        urls += ["/", "/?f=late", "/?f=done", "/?f=red", "/?f=myappr", "/?f=overdue", "/?new=1", "/?repeat=3", reverse("access_matrix")]
+        for username in ["serik", "beketov", "ospanova", "ahmetov", "nurlanova", "musin", "saparov", "ermekov",
+                         "akhmetova", "admin"]:
             self.client.force_login(User.objects.get(username=username))
             for url in urls:
                 r = self.client.get(url)
@@ -345,7 +454,7 @@ class SmokeTests(TestCase):
                         self.assertIn("csrfmiddlewaretoken", form, f"{username} {url}: форма без csrf_token")
 
     def test_portal_link_works_without_login(self):
-        rfq = RFQ.objects.filter(procurement__status=Procurement.Status.COLLECTING).first()
+        rfq = RFQ.objects.first()
         r = self.client.get(reverse("portal_quote", args=[rfq.token]))
         self.assertEqual(r.status_code, 200)
         self.assertContains(r, "Коммерческое предложение")
@@ -436,7 +545,18 @@ class HttpFlowTests(Base):
         self.post(self.initiator, reverse("analog_confirm", args=[d.pk]), {"accept": "1"})
         act("submit_decision")
         proc.refresh_from_db()
+        self.assertEqual(proc.decision_state, Procurement.DecisionState.ON_APPROVAL)
+        # Согласование по коридору с главного экрана: вопрос (не сбрасывает) → ответ → согласовано.
+        approval = proc.approvals.get()
+        self.post(self.chief, reverse("ws_ask", args=[f"p{proc.pk}"]), {"text": "Почему два поставщика?", "next": "/"})
+        q = proc.questions.get()
+        self.post(self.buyer, reverse("ws_answer", args=[q.pk]), {"text": "У одного не хватило объёма"})
+        self.post(self.chief, reverse("ws_comment", args=[f"p{proc.pk}"]), {"text": "Ок, согласую"})
+        self.post(self.chief, reverse("ws_approve", args=[approval.pk]), {"approve": "1", "next": f"/?sel=p{proc.pk}"})
+        proc.refresh_from_db()
         self.assertEqual(proc.decision_state, Procurement.DecisionState.APPROVED)
+        self.assertTrue(proc.history.filter(kind="ok").exists())
+        self.assertTrue(proc.history.filter(kind="comment").exists())
         # 6. Договоры: два поставщика, ручки 2 из 3 → остаток 1 в пул.
         act("contracts", {f"mode_{self.s1.pk}": "new", f"mode_{self.s2.pk}": "new", f"number_{self.s1.pk}": "Д-77"})
         self.assertEqual(Contract.objects.count(), 2)
@@ -483,13 +603,14 @@ class ProductionTests(Base):
             for r in rows:
                 ws.append(list(r))
         put("Подразделения", ("Финансы", "fin_head"))
-        put("Пользователи", ("fin_head", "Ахметова", "Алия", "a@x.kz", "Финансы", "Руководитель", "Согласующий"),
-            ("zakup1", "Касымов", "Данияр", "", "", "", "Закупщик, Инициатор"))
+        put("Пользователи", ("fin_head", "Ахметова", "Алия", "a@x.kz", "Финансы", "Руководитель", "ГРЭС-9", "Руководитель подразделения"),
+            ("zakup1", "Касымов", "Данияр", "", "", "", "", "Закупки (ОМТС), Инициатор"))
         put("Категории", ("Канцтовары",))
         put("Номенклатура", ("Бумага А4", "пач", "Канцтовары", "00-1"))
         put("Поставщики", ("ТОО Альфа", "123456789012", "", "", "", "Канцтовары", ""))
         put("Рамочные договоры", ("РД-1", "01.01.2026", "123456789012", "31.12.2026"))
-        put("Пороги согласования", ("2 000 000", "Директор"))
+        put("Станции", ("ГРЭС-9",))
+        put("Коридоры согласования", ("y", "Жёлтый", "40 000 000", "Главный инженер, Финансы (ФЭО)", "3", ""))
         put("Статьи бюджета")
         buf = io.BytesIO()
         wb.save(buf)
@@ -506,7 +627,8 @@ class ProductionTests(Base):
         self.assertTrue(roles.has_role(u, roles.BUYER))
         self.assertEqual(len(rep.passwords), 2)
         self.assertTrue(Contract.objects.filter(number="РД-1", kind=Contract.Kind.FRAMEWORK).exists())
-        self.assertTrue(ApprovalRule.objects.filter(min_amount=D(2000000)).exists())
+        self.assertEqual(Corridor.objects.get(code="y").max_amount, D(40000000))
+        self.assertTrue(Station.objects.filter(name="ГРЭС-9").exists())
         # Повторная загрузка — обновление, без дублей и без новых паролей.
         rep2 = import_workbook(data)
         self.assertEqual(rep2.created.get("Пользователи"), None)
@@ -517,9 +639,9 @@ class ProductionTests(Base):
         from openpyxl import load_workbook
         from .refs_import import build_template, import_workbook
         wb = load_workbook(io.BytesIO(build_template()))
-        wb["Пользователи"].append(["ok_user", "А", "Б", "", "", "", "Инициатор"])
-        wb["Пользователи"].append(["bad user", "А", "Б", "", "", "", "Инициатор"])
-        wb["Пользователи"].append(["u3", "А", "Б", "", "Нет такого", "", "Космонавт"])
+        wb["Пользователи"].append(["ok_user", "А", "Б", "", "", "", "", "Инициатор"])
+        wb["Пользователи"].append(["bad user", "А", "Б", "", "", "", "", "Инициатор"])
+        wb["Пользователи"].append(["u3", "А", "Б", "", "Нет такого", "", "", "Космонавт"])
         buf = io.BytesIO()
         wb.save(buf)
         rep = import_workbook(buf.getvalue())
@@ -535,7 +657,7 @@ class ProductionTests(Base):
         services.add_rfqs(proc, [self.s1], self.buyer)
         self.quote(proc, self.s1, {self.paper: 100})
         services.decision_preset(proc, "best", self.buyer)
-        services.submit_decision(proc, self.buyer)
+        self.submit_and_approve(proc)
         (c,) = services.create_contracts(proc, self.buyer, {})
         c.number = "Д-5"
         c.save()
@@ -577,3 +699,83 @@ class ProductionTests(Base):
         Memo.objects.filter(pk=m1.pk).delete()  # «дыра» в номерах не приводит к повтору
         m2 = self.memo(self.initiator, [(self.paper, 1)], approve=False)
         self.assertGreater(m2.number, m1.number)
+
+
+class WorkspaceFlowTests(Base):
+    """Сценарий макета ГРЭС через главный экран."""
+
+    def setUp(self):
+        super().setUp()
+        st = Station.objects.create(name="ГРЭС-1")
+        Profile = __import__("core.models", fromlist=["Profile"]).Profile
+        Profile.objects.create(user=self.initiator, department=self.dept, station=st)
+
+    def test_mockup_scenario(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile as F
+        c = self.client
+        # 1. Инициатор: новая потребность из окна (позиции без цен) + скан СЗ, сразу «Отправить».
+        c.force_login(self.initiator)
+        r = c.post(reverse("ws_new_memo"), {
+            "name": "Комплектующие ПЭН-2", "item_name": ["Торцевое уплотнение", "Бумага А4"], "item_qty": ["2", "10"],
+            "item_unit": ["компл.", "пач"], "item_spec": ["по чертежу", ""], "why": "течь по валу",
+            "deliv": (timezone.localdate() + timedelta(days=20)).isoformat(), "send": "1",
+            "file": F("СЗ.txt", "скан".encode()),
+        })
+        memo = Memo.objects.get(title="Комплектующие ПЭН-2")
+        self.assertRedirects(r, f"/?sel=m{memo.pk}&f=all", fetch_redirect_response=False)
+        self.assertEqual(memo.state, Memo.State.ON_APPROVAL)
+        self.assertEqual(memo.items.get(line_no=2).nomenclature, self.paper)  # позиция связалась со справочником
+        self.assertEqual(memo.attachments.count(), 1)
+        self.assertEqual(c.get(f"/?sel=m{memo.pk}").status_code, 200)
+        # 2. Руководитель: «Мои задачи» → согласовать.
+        c.force_login(self.head)
+        self.assertContains(c.get("/"), "Согласовать СЗ")
+        c.post(reverse("memo_action", args=[memo.pk, "approve"]), {"next": f"/?sel=m{memo.pk}"})
+        memo.refresh_from_db()
+        self.assertTrue(memo.is_approved)
+        # 3. Закупщик: из пула в закупку «из одного источника» → быстрая расценка.
+        proc = services.create_procurement(self.buyer, list(memo.items.all()), "ПЭН-2", Procurement.Method.SINGLE)
+        c.force_login(self.buyer)
+        data = {"supplier": self.s1.pk, "method": "single", "pay": "100% после поставки", "next": f"/?sel=p{proc.pk}",
+                "files": [F("КП.txt", "цены".encode())]}
+        for line in proc.lines.all():
+            data[f"price_{line.pk}"] = "150 000" if line.item.line_no == 1 else "2500"
+        c.post(reverse("ws_quick_price", args=[proc.pk]), data)
+        proc.refresh_from_db()
+        self.assertEqual(proc.corridor.code, "g")
+        self.assertEqual(proc.decision_total, D(325000))
+        # Инициатор не видит сумму и не может открыть КП.
+        quote_file = proc.attachments.get()
+        c.force_login(self.initiator)
+        self.assertEqual(c.get(reverse("attachment", args=[quote_file.pk])).status_code, 403)
+        # 4. Главный инженер: «Согласовать все зелёные».
+        c.force_login(self.chief)
+        c.post(reverse("ws_approve_green"))
+        proc.refresh_from_db()
+        self.assertEqual(proc.decision_state, Procurement.DecisionState.APPROVED)
+        # 5. Закупщик: оформить договор, подписать, прикрепить скан.
+        c.force_login(self.buyer)
+        c.post(reverse("procurement_action", args=[proc.pk, "contracts"]), {f"mode_{self.s1.pk}": "new", "next": "/"})
+        contract = Contract.objects.get(procurement=proc)
+        for st in ("signing", "signed"):
+            c.post(reverse("contract_action", args=[contract.pk, "status"]), {"status": st, "next": "/"})
+        c.post(reverse("ws_attach", args=[f"c{contract.pk}"]), {"kind": "contract", "file": F("Договор.txt", b"x")})
+        self.assertEqual(contract.attachments.count(), 1)
+        # 6. Финансы: транш 30%, затем остаток.
+        c.force_login(self.cfo)
+        self.assertContains(c.get("/"), "Оплата")
+        c.post(reverse("contract_action", args=[contract.pk, "payment"]),
+               {"date": timezone.localdate().isoformat(), "amount": "97500", "doc": "ПП-1", "next": "/"})
+        c.post(reverse("contract_action", args=[contract.pk, "payment"]),
+               {"date": timezone.localdate().isoformat(), "amount": "227500", "doc": "ПП-2", "next": "/"})
+        self.assertEqual(contract.paid_total, D(325000))
+        # Выгрузка реестра в Excel.
+        self.assertEqual(c.get(reverse("ws_export")).status_code, 200)
+
+    def test_demo_switch_only_in_demo_mode(self):
+        from django.test import override_settings
+        with override_settings(DEMO_MODE=False):
+            self.assertEqual(self.client.post(reverse("demo_switch"), {"username": "chief"}).status_code, 403)
+        with override_settings(DEMO_MODE=True):
+            self.client.post(reverse("demo_switch"), {"username": "chief"})
+            self.assertEqual(int(self.client.session["_auth_user_id"]), self.chief.pk)

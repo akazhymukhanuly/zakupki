@@ -1,23 +1,43 @@
 :root {
-  --sidebar-w: 232px;
-  --brand: #1f3a5f;
-  --bg: #f4f6f9;
+  --bg: #eef2f7; --surface: #fff; --surface-2: #f7f9fc; --surface-3: #f1f5f9;
+  --ink: #16233a; --ink-2: #5b6b81; --ink-3: #8695a9; --line: #e3e9f1; --line-2: #eef2f7;
+  --brand: #0f2a44; --brand-2: #16406b; --brand-3: #2b6cb0;
+  --accent: #1b7a4f; --accent-soft: #e7f4ed; --info: #2b6cb0; --info-soft: #eaf2fb;
+  --warn: #b7791f; --warn-soft: #fdf3e2; --bad: #b42318; --bad-soft: #fdecea;
+  --violet: #6b46c1; --violet-soft: #f0ecfb; --teal: #0f766e; --teal-soft: #e3f4f2;
+  --radius: 14px; --radius-sm: 10px; --radius-xs: 8px;
+  --shadow-1: 0 1px 2px rgba(16,35,58,.05), 0 2px 8px rgba(16,35,58,.05);
+  --ring: 0 0 0 3px rgba(43,108,176,.2);
 }
-body { background: var(--bg); font-size: .92rem; }
-.sidebar {
-  position: fixed; top: 0; bottom: 0; left: 0; width: var(--sidebar-w);
-  background: var(--brand); color: #cfd8e3; overflow-y: auto; z-index: 1030;
-}
-.sidebar .brand { color: #fff; font-weight: 700; font-size: 1.05rem; padding: 1rem 1.1rem .6rem; display: block; text-decoration: none; }
-.sidebar .brand small { display: block; font-weight: 400; font-size: .72rem; color: #9fb0c4; }
-.sidebar .nav-section { font-size: .68rem; text-transform: uppercase; letter-spacing: .06em; color: #8397ad; padding: .9rem 1.1rem .3rem; }
-.sidebar a.nav-link { color: #cfd8e3; padding: .38rem 1.1rem; display: flex; align-items: center; gap: .55rem; border-left: 3px solid transparent; }
-.sidebar a.nav-link:hover { background: rgba(255,255,255,.06); color: #fff; }
-.sidebar a.nav-link.active { background: rgba(255,255,255,.1); color: #fff; border-left-color: #5ab0ff; }
-.sidebar .nav-link .count { margin-left: auto; }
-.main { margin-left: var(--sidebar-w); min-height: 100vh; }
-.topbar { background: #fff; border-bottom: 1px solid #e3e7ed; padding: .55rem 1.5rem; display: flex; align-items: center; gap: 1rem; position: sticky; top: 0; z-index: 1020; }
-.content { padding: 1.25rem 1.5rem 3rem; }
+body { background: var(--bg); color: var(--ink); font-size: .9rem; font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; -webkit-font-smoothing: antialiased; }
+a { color: var(--brand-3); }
+
+/* ---------- шапка как в макете ---------- */
+.gh { display: flex; align-items: center; gap: 14px; padding: 10px 22px; color: #fff;
+  background: linear-gradient(180deg, #16406b 0%, #0f2a44 100%); box-shadow: 0 8px 24px rgba(15,42,68,.18); position: relative; z-index: 1030; }
+.gh-brand { display: flex; align-items: center; color: #fff; text-decoration: none; white-space: nowrap; }
+.brand-mark { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; margin-right: 9px;
+  border-radius: 9px; background: linear-gradient(180deg, #f6c453, #e0a51f); box-shadow: inset 0 1px 0 rgba(255,255,255,.5); font-size: 15px; }
+.brand-text { font-weight: 600; font-size: 16px; line-height: 1.15; }
+.brand-text em { display: block; font-style: normal; font-size: 10.5px; font-weight: 500; letter-spacing: .8px; text-transform: uppercase; color: rgba(255,255,255,.58); }
+.gh-search input { width: 340px; padding: 8px 14px 8px 36px; border: 1px solid transparent; border-radius: var(--radius-sm); font-size: 13px; color: var(--ink);
+  background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238695a9' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='M20 20l-3.6-3.6'/%3E%3C/svg%3E") 12px center / 16px no-repeat; }
+.gh-search input:focus { outline: none; box-shadow: var(--ring); }
+.btn-ghost { background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.18); color: #fff; }
+.btn-ghost:hover { background: rgba(255,255,255,.2); color: #fff; }
+.gh-user { margin-left: auto; display: flex; align-items: center; gap: 10px; font-size: 12.5px; }
+.gh-select { max-width: 300px; font-size: 12.5px; }
+.pill { background: #f0b429; color: #1d2530; border-radius: 999px; padding: 3px 11px; font-weight: 700; font-size: 12px; text-decoration: none; white-space: nowrap; }
+.gh-icon { color: #fff; font-size: 18px; position: relative; text-decoration: none; }
+.gh-badge { position: absolute; top: -6px; right: -9px; background: #e24d4d; color: #fff; border-radius: 999px; font-size: 10px; padding: 1px 5px; font-weight: 700; }
+.gnav { display: flex; gap: 2px; padding: 0 16px; background: #fff; border-bottom: 1px solid var(--line); overflow-x: auto; white-space: nowrap; }
+.gnav a { padding: 10px 12px; color: var(--ink-2); text-decoration: none; font-size: 13px; font-weight: 500; border-bottom: 2px solid transparent; }
+.gnav a:hover { color: var(--ink); }
+.gnav a.on { color: var(--brand); border-bottom-color: var(--brand-3); font-weight: 600; }
+.content { padding: 1.1rem 1.4rem 3rem; }
+.content-ws { padding: 0; }
+.gmsg { margin: 10px 20px 0; }
+.content .gmsg { margin: 0 0 12px; }
 .page-title { font-size: 1.35rem; font-weight: 600; margin: 0; }
 .card { border: 1px solid #e3e7ed; box-shadow: 0 1px 2px rgba(16,24,40,.04); }
 .card-header { background: #fff; font-weight: 600; }
@@ -71,16 +91,14 @@ body { background: var(--bg); font-size: .92rem; }
 .history li { padding: .35rem 0; border-bottom: 1px dashed #e5e7eb; }
 .kbd-hint { font-size: .75rem; color: #6b7785; }
 @media (max-width: 991px) {
-  .sidebar { position: static; width: 100%; display: flex; flex-wrap: wrap; align-items: center; padding: .25rem .5rem; }
-  .sidebar .brand { padding: .5rem; width: 100%; }
-  .sidebar .brand small, .sidebar .nav-section { display: none; }
-  .sidebar a.nav-link { padding: .3rem .6rem; border-left: 0; border-radius: .3rem; font-size: .85rem; }
-  .main { margin-left: 0; }
-  .topbar { position: static; padding: .5rem 1rem; }
+  .gh { flex-wrap: wrap; gap: 8px; padding: 9px 12px; }
+  .gh-search { order: 10; flex: 1 1 100%; }
+  .gh-search input { width: 100%; }
+  .brand-text em { display: none; }
+  .gh-user { margin-left: 0; flex-wrap: wrap; }
   .content { padding: 1rem; }
 }
 @media print {
-  .sidebar, .topbar, .no-print { display: none !important; }
-  .main { margin-left: 0; }
+  .gh, .gnav, .no-print { display: none !important; }
   body { background: #fff; }
 }

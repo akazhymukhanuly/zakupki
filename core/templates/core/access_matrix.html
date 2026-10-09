@@ -1,0 +1,13 @@
+{% extends "core/base.html" %}
+{% block title %}Доступ к показателям{% endblock %}
+{% block content %}
+<h1 class="page-title mb-1">Доступ к показателям</h1>
+<p class="muted">Какие плитки KPI на главном экране видит каждая роль. Права на действия — на странице «Роли и права».</p>
+<form method="post">{% csrf_token %}
+<div class="card"><div class="table-responsive"><table class="table table-sm table-bordered mb-0">
+  <thead><tr><th>Показатель</th>{% for r in roles %}<th class="text-center small">{{ r }}</th>{% endfor %}</tr></thead>
+  {% for k, label, cells in matrix %}<tr><td>{{ label }}</td>{% for r, on in cells %}<td class="text-center"><input type="checkbox" class="form-check-input" name="{{ k }}|{{ r }}" {% if on %}checked{% endif %}></td>{% endfor %}</tr>{% endfor %}
+</table></div></div>
+<button class="btn btn-primary mt-3">Сохранить</button>
+</form>
+{% endblock %}

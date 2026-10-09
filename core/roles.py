@@ -9,49 +9,73 @@ from django.core.exceptions import PermissionDenied
 from django.shortcuts import redirect
 
 INITIATOR = "Инициатор"
-APPROVER = "Согласующий"
-BUYER = "Закупщик"
-DIRECTOR = "Директор"
-CFO = "Финдиректор"
-ACCOUNTANT = "Бухгалтер"
+APPROVER = "Руководитель подразделения"   # согласует СЗ своего подразделения (шаг 1 ТЗ)
+BUYER = "Закупки (ОМТС)"
+CHIEF = "Главный инженер"
+CFO = "Финансы (ФЭО)"
+LAWYER = "Юристы (ЮО)"
+DIRECTOR = "Генеральный директор"
+PTO = "ПТО"
+ACCOUNTANT = "Бухгалтерия"
 ADMIN = "Администратор"
 
-ALL_ROLES = [INITIATOR, APPROVER, BUYER, DIRECTOR, CFO, ACCOUNTANT, ADMIN]
+ALL_ROLES = [INITIATOR, APPROVER, BUYER, CHIEF, CFO, LAWYER, DIRECTOR, PTO, ACCOUNTANT, ADMIN]
+
+# Короткие подписи ролей для чипов согласования
+SHORT = {
+    INITIATOR: "Инициатор", APPROVER: "Руководитель", BUYER: "Закупки", CHIEF: "Главный инженер",
+    CFO: "Финансы", LAWYER: "Юристы", DIRECTOR: "Ген. директор", PTO: "ПТО", ACCOUNTANT: "Бухгалтерия",
+    ADMIN: "Администратор",
+}
+
+DECIDERS = [CHIEF, CFO, BUYER, LAWYER, DIRECTOR, PTO]
+EVERYONE_BUT_INITIATOR = [APPROVER, BUYER, CHIEF, CFO, LAWYER, DIRECTOR, PTO, ACCOUNTANT, ADMIN]
+MANAGEMENT = [CHIEF, DIRECTOR, CFO, ADMIN]
 
 # Матрица прав: действие → роли, которым оно разрешено.
 PERMISSIONS = {
-    "memo.create": [INITIATOR, BUYER, ADMIN],
-    "memo.view_all": [BUYER, DIRECTOR, CFO, ACCOUNTANT, ADMIN],
-    "memo.approve": [APPROVER, DIRECTOR, ADMIN],
-    "pool.view": [BUYER, DIRECTOR, ADMIN],
+    "memo.create": [INITIATOR, APPROVER, BUYER, PTO, ADMIN],
+    "memo.view_all": [BUYER, CHIEF, CFO, LAWYER, DIRECTOR, PTO, ACCOUNTANT, ADMIN],
+    "memo.approve": [APPROVER, CHIEF, ADMIN],
+    "pool.view": [BUYER, CHIEF, ADMIN],
     "procurement.manage": [BUYER, ADMIN],
-    "procurement.view": [BUYER, DIRECTOR, CFO, ACCOUNTANT, ADMIN],
-    "decision.approve": [DIRECTOR, CFO, ADMIN],
+    "procurement.view": [BUYER, CHIEF, CFO, LAWYER, DIRECTOR, PTO, ACCOUNTANT, ADMIN],
+    "decision.approve": DECIDERS + [ADMIN],
     "contract.manage": [BUYER, ADMIN],
-    "contract.view": [BUYER, DIRECTOR, CFO, ACCOUNTANT, ADMIN],
-    "contract.finance": [ACCOUNTANT, BUYER, ADMIN],
-    "integration.1c": [ACCOUNTANT, BUYER, ADMIN],
-    "reports.view": [BUYER, DIRECTOR, CFO, ADMIN],
+    "contract.view": [BUYER, CHIEF, CFO, LAWYER, DIRECTOR, PTO, ACCOUNTANT, ADMIN],
+    "contract.finance": [CFO, ACCOUNTANT, BUYER, ADMIN],
+    "integration.1c": [ACCOUNTANT, CFO, BUYER, ADMIN],
+    "reports.view": [BUYER, CHIEF, CFO, DIRECTOR, ADMIN],
     "dashboard.buyer": [BUYER, ADMIN],
+    "director.overview": MANAGEMENT,
     "refs.import": [ADMIN],
+    "access.manage": [ADMIN],
 }
 
 PERMISSION_LABELS = {
-    "memo.create": "Создание СЗ",
+    "memo.create": "Создание СЗ (потребности)",
     "memo.view_all": "Просмотр всех СЗ",
-    "memo.approve": "Согласование СЗ",
+    "memo.approve": "Согласование СЗ подразделения",
     "pool.view": "Пул потребностей",
-    "procurement.manage": "Ведение закупок, ввод КП, решение",
+    "procurement.manage": "Расценка: закупки, КП, решение, договоры",
     "procurement.view": "Просмотр закупок",
-    "decision.approve": "Согласование решения по закупке (по порогам)",
+    "decision.approve": "Согласование по коридору (если роль входит в коридор)",
     "contract.manage": "Создание и ведение договоров",
     "contract.view": "Просмотр договоров",
-    "contract.finance": "Ввод оплат и поступлений",
+    "contract.finance": "Оплаты (транши) и поступления",
     "integration.1c": "Обмен с 1С",
     "reports.view": "Отчёты",
     "dashboard.buyer": "Дэшборд закупщика",
+    "director.overview": "Обзор руководителя",
     "refs.import": "Загрузка справочников из Excel",
+    "access.manage": "Настройка доступа к показателям",
 }
+
+
+def sees_prices(user):
+    """Инициатор цены не видит и не указывает (как в макете): только те, у кого есть другая роль."""
+    r = user_roles(user)
+    return bool(r - {INITIATOR})
 
 
 def user_roles(user):

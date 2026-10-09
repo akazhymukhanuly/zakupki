@@ -1,0 +1,15 @@
+<div class="kv mb-1"><b>Файлы</b><span class="files">
+  {% for a in card.attachments %}<a href="{% url 'attachment' a.pk %}" target="_blank" title="{{ a.get_kind_display }}">📎 {{ a.name }}</a>{% empty %}<span class="muted">нет</span>{% endfor %}
+</span></div>
+<details class="mb-2"><summary class="small text-primary" style="cursor:pointer">+ Прикрепить файл</summary>
+  <form method="post" enctype="multipart/form-data" action="{% url 'ws_attach' row.key %}" class="d-flex gap-2 mt-2 flex-wrap">{% csrf_token %}
+    <input type="hidden" name="next" value="{{ request.get_full_path }}">
+    <input type="file" name="file" class="form-control form-control-sm" style="max-width:240px" required>
+    <select name="kind" class="form-select form-select-sm" style="width:auto">
+      {% if row.kind == 'memo' %}<option value="memo">Служебная записка</option><option value="other">Прочее</option>
+      {% elif row.kind == 'proc' %}<option value="quote">КП / счёт</option><option value="other">Прочее</option>
+      {% else %}<option value="contract">Договор</option><option value="act">Акт / накладная</option><option value="other">Прочее</option>{% endif %}
+    </select>
+    <button class="btn btn-sm btn-l">Загрузить</button>
+  </form>
+</details>

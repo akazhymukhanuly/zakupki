@@ -42,6 +42,20 @@ class Counter(models.Model):
 # ---------------------------------------------------------------- Справочники
 
 
+class Station(models.Model):
+    """Станция (ГРЭС-1, ГРЭС-2 …): фильтр реестра и сводка по станциям."""
+
+    name = models.CharField("Станция", max_length=100, unique=True)
+
+    class Meta:
+        verbose_name = "станция"
+        verbose_name_plural = "станции"
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+
 class Department(models.Model):
     name = models.CharField("Подразделение", max_length=200, unique=True)
     head = models.ForeignKey(
@@ -64,6 +78,7 @@ class Profile(models.Model):
         Department, verbose_name="Подразделение", null=True, blank=True, on_delete=models.SET_NULL
     )
     position = models.CharField("Должность", max_length=200, blank=True)
+    station = models.ForeignKey(Station, verbose_name="Станция", null=True, blank=True, on_delete=models.SET_NULL)
 
     class Meta:
         verbose_name = "профиль"
@@ -76,6 +91,7 @@ class Profile(models.Model):
 class BudgetItem(models.Model):
     code = models.CharField("Код", max_length=50, unique=True)
     name = models.CharField("Статья бюджета", max_length=200)
+    limit = models.DecimalField("Лимит на год, ₸", max_digits=18, decimal_places=2, null=True, blank=True)
 
     class Meta:
         verbose_name = "статья бюджета"
@@ -84,6 +100,18 @@ class BudgetItem(models.Model):
 
     def __str__(self):
         return f"{self.code} {self.name}"
+
+    @property
+    def spent(self):
+        """Законтрактовано по статье за текущий год (без аннулированных договоров)."""
+        year = timezone.localdate().year
+        lines = ContractLine.objects.filter(item__budget_item=self, contract__date__year=year).exclude(
+            contract__status=Contract.Status.CANCELLED)
+        return sum((l.amount for l in lines), ZERO)
+
+    @property
+    def remainder(self):
+        return None if self.limit is None else self.limit - self.spent
 
 
 class Category(models.Model):
@@ -131,19 +159,64 @@ class Supplier(models.Model):
         return self.name
 
 
-class ApprovalRule(models.Model):
-    """Порог согласования решения по закупке (шаг 7): сумма ≥ порога → нужна роль."""
+class Corridor(models.Model):
+    """Коридор согласования решения по закупке (как в макете): по сумме — свой круг согласующих.
 
-    min_amount = models.DecimalField("Сумма от", max_digits=16, decimal_places=2)
-    role = models.CharField("Роль согласующего", max_length=50)
+    Все согласующие коридора работают параллельно; срок — в рабочих днях.
+    Коридор «simple» — упрощённый круг для закупок по действующему договору.
+    """
+
+    code = models.CharField("Код", max_length=20, unique=True)
+    name = models.CharField("Название", max_length=100)
+    color = models.CharField("Цвет", max_length=10, default="g", help_text="g / y / r / b")
+    max_amount = models.DecimalField("Сумма до (включительно), ₸", max_digits=18, decimal_places=2, null=True, blank=True,
+                                     help_text="Пусто — без верхней границы")
+    roles = models.CharField("Согласующие роли (через запятую)", max_length=500)
+    sla_days = models.PositiveSmallIntegerField("Срок, рабочих дней", default=1)
+    by_contract = models.BooleanField("Для закупок по действующему договору", default=False)
 
     class Meta:
-        verbose_name = "правило согласования решения"
-        verbose_name_plural = "правила согласования решений"
-        ordering = ["min_amount"]
+        verbose_name = "коридор согласования"
+        verbose_name_plural = "коридоры согласования"
+        ordering = ["by_contract", "max_amount"]
 
     def __str__(self):
-        return f"≥ {self.min_amount:,.0f} → {self.role}"
+        return self.name
+
+    @property
+    def role_list(self):
+        return [r.strip() for r in self.roles.split(",") if r.strip()]
+
+    @property
+    def emoji(self):
+        return {"g": "🟢", "y": "🟡", "r": "🔴", "b": "🔵"}.get(self.color, "⚪")
+
+    @classmethod
+    def for_amount(cls, amount, by_contract=False):
+        if by_contract:
+            c = cls.objects.filter(by_contract=True).first()
+            if c:
+                return c
+        for c in cls.objects.filter(by_contract=False).order_by(models.F("max_amount").asc(nulls_last=True)):
+            if c.max_amount is None or amount <= c.max_amount:
+                return c
+        return None
+
+
+class AppSetting(models.Model):
+    """Настройки, редактируемые из интерфейса (например, матрица доступа к показателям)."""
+
+    key = models.CharField(max_length=100, unique=True)
+    value = models.JSONField(default=dict)
+
+    @classmethod
+    def get(cls, key, default=None):
+        obj = cls.objects.filter(key=key).first()
+        return obj.value if obj else default
+
+    @classmethod
+    def put(cls, key, value):
+        cls.objects.update_or_create(key=key, defaults={"value": value})
 
 
 class MemoTemplate(models.Model):
@@ -179,8 +252,14 @@ class Memo(models.Model):
         REJECTED = "rejected", "Отклонена"
 
     number = models.PositiveIntegerField("Номер", unique=True, editable=False)
+    station = models.ForeignKey(Station, verbose_name="Станция", null=True, blank=True, on_delete=models.PROTECT)
     department = models.ForeignKey(Department, verbose_name="Подразделение", on_delete=models.PROTECT)
     initiator = models.ForeignKey(User, verbose_name="Инициатор", on_delete=models.PROTECT, related_name="memos")
+    title = models.CharField("Название заявки", max_length=300, blank=True,
+                             help_text="Если пусто — по первой позиции")
+    category = models.ForeignKey("Category", verbose_name="Категория", null=True, blank=True, on_delete=models.SET_NULL)
+    budget_item = models.ForeignKey(BudgetItem, verbose_name="Статья бюджета", null=True, blank=True,
+                                    on_delete=models.PROTECT)
     justification = models.TextField("Обоснование")
     required_date = models.DateField("Требуемый срок")
     state = models.CharField("Состояние документа", max_length=30, choices=State.choices, default=State.DRAFT)
@@ -208,6 +287,15 @@ class Memo(models.Model):
 
     def get_absolute_url(self):
         return reverse("memo_detail", args=[self.pk])
+
+    @property
+    def display_title(self):
+        if self.title:
+            return self.title
+        items = list(self.items.all())
+        if not items:
+            return "Новая потребность"
+        return items[0].description + (f" и ещё {len(items) - 1} поз." if len(items) > 1 else "")
 
     @property
     def is_editable(self):
@@ -314,6 +402,7 @@ class MemoItem(models.Model):
         Nomenclature, verbose_name="Номенклатура", null=True, blank=True, on_delete=models.PROTECT
     )
     description = models.CharField("Описание", max_length=500)
+    spec = models.CharField("Марка / ГОСТ / характеристики", max_length=500, blank=True)
     quantity = models.DecimalField("Кол-во", max_digits=14, decimal_places=3)
     unit = models.CharField("Ед. изм.", max_length=30, default="шт")
     required_date = models.DateField("Требуемый срок")
@@ -436,9 +525,11 @@ class Procurement(models.Model):
         CANCELLED = "cancelled", "Отменена"
 
     class Method(models.TextChoices):
-        RFQ = "rfq", "Запрос КП"
-        TENDER = "tender", "Тендер"
-        SINGLE = "single", "У единственного поставщика"
+        RFQ = "rfq", "Запрос ценовых предложений"
+        TENDER = "tender", "Открытый тендер"
+        SINGLE = "single", "Из одного источника"
+        FRAMEWORK = "framework", "Из одного источника (рамочный)"
+        CONTRACT = "contract", "По действующему договору"
 
     class DecisionState(models.TextChoices):
         NONE = "none", "Не сформировано"
@@ -456,6 +547,10 @@ class Procurement(models.Model):
         "Решение", max_length=20, choices=DecisionState.choices, default=DecisionState.NONE
     )
     decision_comment = models.TextField("Комментарий к решению", blank=True)
+    corridor = models.ForeignKey(Corridor, verbose_name="Коридор", null=True, blank=True, on_delete=models.SET_NULL)
+    station = models.ForeignKey(Station, verbose_name="Станция", null=True, blank=True, on_delete=models.SET_NULL)
+    payment_terms = models.CharField("Условия оплаты", max_length=300, blank=True)
+    decision_submitted_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -487,6 +582,15 @@ class Procurement(models.Model):
     @property
     def is_open(self):
         return self.status not in (self.Status.CLOSED, self.Status.CANCELLED)
+
+    @property
+    def is_simple_method(self):
+        """Один поставщик без сбора нескольких КП — быстрая расценка, как в макете."""
+        return self.method in (self.Method.SINGLE, self.Method.FRAMEWORK, self.Method.CONTRACT)
+
+    @property
+    def memos(self):
+        return Memo.objects.filter(items__procurement_lines__procurement=self).distinct()
 
     @property
     def is_overdue_kp(self):
@@ -659,6 +763,12 @@ class DecisionApproval(models.Model):
     user = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL)
     comment = models.CharField(max_length=500, blank=True)
     decided_at = models.DateTimeField(null=True, blank=True)
+    due_at = models.DateTimeField("Срок", null=True, blank=True)
+    escalated = models.BooleanField(default=False)
+
+    @property
+    def is_overdue(self):
+        return self.state == self.State.PENDING and self.due_at and self.due_at < timezone.now()
 
 
 # ---------------------------------------------------------------- Договор
@@ -844,10 +954,65 @@ class HistoryEntry(models.Model):
     contract = models.ForeignKey(Contract, null=True, blank=True, on_delete=models.CASCADE, related_name="history")
     user = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL)
     text = models.TextField()
+    kind = models.CharField(max_length=10, blank=True, choices=[
+        ("", "событие"), ("ok", "согласовано"), ("q", "вопрос"), ("bad", "отклонено"), ("auto", "система"),
+        ("comment", "комментарий"),
+    ])
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ["-created_at"]
+
+
+class Question(models.Model):
+    """Вопрос согласующего: не сбрасывает уже полученные согласования (как в макете)."""
+
+    memo = models.ForeignKey(Memo, null=True, blank=True, on_delete=models.CASCADE, related_name="questions")
+    procurement = models.ForeignKey(Procurement, null=True, blank=True, on_delete=models.CASCADE, related_name="questions")
+    asked_by = models.ForeignKey(User, on_delete=models.PROTECT, related_name="+")
+    text = models.TextField()
+    answer = models.TextField(blank=True)
+    answered_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+    answered_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["created_at"]
+
+    @property
+    def is_open(self):
+        return not self.answered_at
+
+
+def attachment_path(instance, filename):
+    return f"files/{timezone.localdate():%Y/%m}/{secrets.token_hex(8)}_{filename}"
+
+
+class Attachment(models.Model):
+    """Вложения: скан СЗ, КП, счета, договоры, акты. Отдаются только через проверку прав."""
+
+    class Kind(models.TextChoices):
+        MEMO = "memo", "Служебная записка"
+        QUOTE = "quote", "КП / счёт"
+        CONTRACT = "contract", "Договор"
+        ACT = "act", "Акт / накладная"
+        OTHER = "other", "Прочее"
+
+    memo = models.ForeignKey(Memo, null=True, blank=True, on_delete=models.CASCADE, related_name="attachments")
+    procurement = models.ForeignKey(Procurement, null=True, blank=True, on_delete=models.CASCADE, related_name="attachments")
+    contract = models.ForeignKey(Contract, null=True, blank=True, on_delete=models.CASCADE, related_name="attachments")
+    kind = models.CharField(max_length=20, choices=Kind.choices, default=Kind.OTHER)
+    file = models.FileField(upload_to=attachment_path)
+    name = models.CharField(max_length=255)
+    uploaded_by = models.ForeignKey(User, null=True, on_delete=models.SET_NULL)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["created_at"]
+
+    @property
+    def has_prices(self):
+        return self.kind in (self.Kind.QUOTE, self.Kind.CONTRACT)
 
 
 class ReminderLog(models.Model):
